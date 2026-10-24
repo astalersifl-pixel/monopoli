@@ -2,6 +2,10 @@
 
 7×7マスの盤面でサイコロを振り、土地の契約・ランクアップ・多彩なイベントカードで目標金額を目指す本格すごろくボードゲームです。
 
+- **最大5人対戦**（人間・CPUを自由に組み合わせ可能）
+- **🌐 オンライン対戦機能**（WebRTC / PeerJSによる完全サーバーレス通信。部屋コードまたは招待URLを友達に送るだけで、離れた友達とリアルタイム対戦可能！）
+- **完全画面フィット**（スマホ・PCの全画面でスクロール不要のコンパクトUI）
+
 ---
 
 ## 🛠️ ローカルでの起動方法
@@ -57,7 +61,7 @@ git push -u origin main
 4. 設定項目を以下のように入力します：
    - **Name**: `monopolii`（お好みのサイト名）
    - **Branch**: `main`
-   - **Build Command**: `npm install && npm run build`
+   - **Build Command**: `npm run build`
    - **Publish Directory**: `dist`
 5. 一番下の **「Create Static Site」** をクリック！
 

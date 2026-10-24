@@ -30,6 +30,8 @@ interface BoardProps {
   gamePhase: GamePhase;
   activePriceFluctuation: ActivePriceFluctuation | null;
   logs: GameLog[];
+  myPlayerId?: string;
+  isOnline?: boolean;
   onRollDice: () => void;
   onSelectTile: (tile: Tile) => void;
   onBuyLand: () => void;
@@ -52,6 +54,8 @@ export const Board: React.FC<BoardProps> = ({
   gamePhase,
   activePriceFluctuation,
   logs,
+  myPlayerId,
+  isOnline,
   onRollDice,
   onSelectTile,
   onBuyLand,
@@ -65,7 +69,8 @@ export const Board: React.FC<BoardProps> = ({
   onOpenRules,
 }) => {
   const currentTile = tiles[currentPlayer.position];
-  const isHumanTurn = !currentPlayer.isAi;
+  const isMyTurn = !isOnline || currentPlayer.id === myPlayerId;
+  const isHumanTurn = !currentPlayer.isAi && isMyTurn;
 
   // Rent info for current tile if it's a land
   const currentLandRentInfo =
@@ -78,9 +83,15 @@ export const Board: React.FC<BoardProps> = ({
       : null;
 
   return (
-    <div className="w-full max-w-[860px] aspect-square mx-auto p-2 sm:p-3 bg-slate-900/90 rounded-3xl shadow-2xl border-4 border-slate-700/80 backdrop-blur-md flex flex-col">
+    <div
+      style={{
+        width: 'min(98vw, calc(100dvh - 5.2rem))',
+        height: 'min(98vw, calc(100dvh - 5.2rem))',
+      }}
+      className="aspect-square mx-auto p-1 sm:p-2 bg-slate-900/90 rounded-2xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 border-slate-700/80 backdrop-blur-md flex flex-col shrink-0"
+    >
       {/* 7x7 CSS Grid layout */}
-      <div className="w-full h-full grid grid-cols-7 grid-rows-7 gap-1 sm:gap-1.5 relative">
+      <div className="w-full h-full grid grid-cols-7 grid-rows-7 gap-0.5 sm:gap-1 relative">
         {/* Render 24 outer perimeter tiles */}
         {tiles.map((tile) => {
           const rowStyle = {
@@ -211,7 +222,7 @@ export const Board: React.FC<BoardProps> = ({
                   isRolling={isRolling}
                   onRoll={onRollDice}
                   disabled={!isHumanTurn || isRolling}
-                  size="lg"
+                  size="md"
                   label={isRolling ? 'サイコロ回転中…' : `出目: ${currentDice}`}
                 />
 
@@ -220,13 +231,15 @@ export const Board: React.FC<BoardProps> = ({
                     type="button"
                     onClick={onRollDice}
                     disabled={isRolling}
-                    className="px-8 py-3 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-slate-950 font-black text-sm sm:text-base rounded-2xl shadow-xl hover:brightness-110 active:scale-95 cursor-pointer disabled:opacity-50"
+                    className="px-6 py-2 sm:px-7 sm:py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-lg hover:brightness-110 active:scale-95 cursor-pointer disabled:opacity-50"
                   >
                     {isRolling ? '振っています…' : 'サイコロを振る！'}
                   </button>
                 ) : (
                   <div className="text-xs sm:text-sm text-purple-200 font-bold bg-purple-900/40 px-4 py-2 rounded-xl border border-purple-400/30 animate-pulse">
-                    CPU思考中… サイコロを振ります
+                    {currentPlayer.isAi
+                      ? 'CPU思考中… サイコロを振ります'
+                      : `${currentPlayer.name} の手番です（操作を待機中…）`}
                   </div>
                 )}
               </div>

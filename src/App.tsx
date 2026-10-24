@@ -7,11 +7,14 @@ import {
   ActivePriceFluctuation,
   GameLog,
   GameSettings,
+  GameStateSync,
+  PlayerColor,
 } from './types/game';
 import { INITIAL_TILES, calculateLandRent } from './utils/boardData';
 import { drawRandomEventCard } from './utils/eventCards';
 import { AIHelper } from './utils/ai';
 import { sounds } from './utils/audio';
+import { onlineManager, NetworkMessage } from './utils/online';
 
 import { Board } from './components/Board';
 import { GameHeader } from './components/GameHeader';
@@ -20,8 +23,11 @@ import { CasinoModal } from './components/CasinoModal';
 import { BankruptcyModal } from './components/BankruptcyModal';
 import { TileDetailModal } from './components/TileDetailModal';
 import { StartGameModal } from './components/StartGameModal';
+import { OnlineLobbyModal } from './components/OnlineLobbyModal';
 import { RulesModal } from './components/RulesModal';
 import { VictoryModal } from './components/VictoryModal';
+
+const ONLINE_COLORS: PlayerColor[] = ['red', 'blue', 'emerald', 'amber', 'purple'];
 
 export default function App() {
   // Game Configuration & State
@@ -50,7 +56,7 @@ export default function App() {
   // Bankruptcy State
   const [bankruptcyDebt, setBankruptcyDebt] = useState<{
     debtAmount: number;
-    creditorPlayerId: string | null; // null means bank/system
+    creditorPlayerId: string | null;
   } | null>(null);
 
   // Game Logs
@@ -65,7 +71,49 @@ export default function App() {
   // Winner
   const [winner, setWinner] = useState<Player | null>(null);
 
-  // Delay helper based on game speed
+  // Online Multiplayer State
+  const [isOnline, setIsOnline] = useState<boolean>(false);
+  const [isHost, setIsHost] = useState<boolean>(true);
+  const [myPlayerId, setMyPlayerId] = useState<string>('p1');
+  const [onlineRoomCode, setOnlineRoomCode] = useState<string>('');
+  const [showOnlineLobby, setShowOnlineLobby] = useState<boolean>(false);
+
+  // Keep ref to latest state for online broadcasting
+  const latestStateRef = useRef<GameStateSync>({
+    players,
+    currentPlayerIndex,
+    tiles,
+    gamePhase,
+    currentDice,
+    activePriceFluctuation,
+    currentEventCard,
+    logs,
+    winner,
+    settings,
+    bankruptcyDebt,
+  });
+
+  useEffect(() => {
+    latestStateRef.current = {
+      players,
+      currentPlayerIndex,
+      tiles,
+      gamePhase,
+      currentDice,
+      activePriceFluctuation,
+      currentEventCard,
+      logs,
+      winner,
+      settings,
+      bankruptcyDebt,
+    };
+  });
+
+  // Sound sync
+  useEffect(() => {
+    sounds.enabled = settings.soundEnabled;
+  }, [settings.soundEnabled]);
+
   const getDelay = (normalMs: number) => {
     return settings.gameSpeed === 'fast' ? Math.max(100, Math.floor(normalMs * 0.45)) : normalMs;
   };
@@ -89,16 +137,181 @@ export default function App() {
 
   const currentPlayer = players[currentPlayerIndex] || null;
 
-  // Sound sync
-  useEffect(() => {
-    sounds.enabled = settings.soundEnabled;
-  }, [settings.soundEnabled]);
+  // Broadcast state to all online peers if Host
+  const broadcastStateIfHost = (overrides: Partial<GameStateSync> = {}) => {
+    if (!isOnline || !isHost) return;
+    const syncData: GameStateSync = {
+      ...latestStateRef.current,
+      ...overrides,
+    };
+    onlineManager.broadcast({
+      type: 'SYNC_STATE',
+      payload: syncData,
+    });
+  };
 
-  // Handle Game Setup
-  const handleStartNewGame = (newPlayers: Player[], newSettings: GameSettings) => {
+  // Setup Online Listeners
+  useEffect(() => {
+    onlineManager.onMessageReceived = (msg: NetworkMessage, fromPeerId: string) => {
+      // 1. Host receives JOIN_REQUEST from guest
+      if (isHost && msg.type === 'JOIN_REQUEST') {
+        const guestData = msg.payload as { name: string; avatar: string };
+        setPlayers((prev) => {
+          if (prev.length >= 5) {
+            onlineManager.connections.get(fromPeerId)?.send({
+              type: 'JOIN_REJECTED',
+              payload: '満員のため参加できませんでした（最大5人）',
+            });
+            return prev;
+          }
+          const nextIndex = prev.length;
+          const assignedId = `p${nextIndex + 1}` as Player['id'];
+          const newPlayer: Player = {
+            id: assignedId,
+            name: guestData.name || `プレイヤー${nextIndex + 1}`,
+            isAi: false,
+            color: ONLINE_COLORS[nextIndex],
+            avatar: guestData.avatar || '🚗',
+            money: 1000,
+            position: 0,
+            inHelloWork: false,
+            hasRentExemption: false,
+            hasSuperLucky: false,
+            totalLaps: 0,
+            peerId: fromPeerId,
+          };
+          const updated = [...prev, newPlayer];
+
+          // Reply accepted to guest
+          onlineManager.connections.get(fromPeerId)?.send({
+            type: 'JOIN_ACCEPTED',
+            payload: {
+              myPlayerId: assignedId,
+              players: updated,
+              settings,
+            },
+          });
+
+          // Broadcast lobby update to all guests
+          onlineManager.broadcast({
+            type: 'LOBBY_UPDATE',
+            payload: { players: updated },
+          });
+
+          return updated;
+        });
+      }
+
+      // 2. Guest receives JOIN_ACCEPTED
+      if (!isHost && msg.type === 'JOIN_ACCEPTED') {
+        const data = msg.payload as {
+          myPlayerId: string;
+          players: Player[];
+          settings: GameSettings;
+        };
+        setMyPlayerId(data.myPlayerId);
+        setPlayers(data.players);
+        setSettings(data.settings);
+        setShowOnlineLobby(true);
+      }
+
+      // 3. Guest receives LOBBY_UPDATE
+      if (!isHost && msg.type === 'LOBBY_UPDATE') {
+        const data = msg.payload as { players: Player[] };
+        setPlayers(data.players);
+      }
+
+      // 4. Guest receives START_GAME
+      if (!isHost && msg.type === 'START_GAME') {
+        const syncData = msg.payload as GameStateSync;
+        applySyncState(syncData);
+        setShowOnlineLobby(false);
+      }
+
+      // 5. Guest receives SYNC_STATE
+      if (!isHost && msg.type === 'SYNC_STATE') {
+        const syncData = msg.payload as GameStateSync;
+        applySyncState(syncData);
+      }
+
+      // 6. Host receives PLAYER_ACTION from Guest
+      if (isHost && msg.type === 'PLAYER_ACTION') {
+        handleGuestAction(msg.payload);
+      }
+    };
+  }, [isHost, settings]);
+
+  const applySyncState = (data: GameStateSync) => {
+    setPlayers(data.players);
+    setCurrentPlayerIndex(data.currentPlayerIndex);
+    setTiles(data.tiles);
+    setGamePhase(data.gamePhase);
+    setCurrentDice(data.currentDice);
+    setActivePriceFluctuation(data.activePriceFluctuation);
+    setCurrentEventCard(data.currentEventCard);
+    setLogs(data.logs);
+    setWinner(data.winner);
+    setSettings(data.settings);
+    setBankruptcyDebt(data.bankruptcyDebt);
+  };
+
+  // Host handles guest actions
+  const handleGuestAction = (payload: any) => {
+    const action = payload.action;
+    if (action === 'roll_dice') {
+      handleRollDice();
+    } else if (action === 'buy_land') {
+      handleBuyLand();
+    } else if (action === 'skip_buy_land') {
+      handleSkipBuyLand();
+    } else if (action === 'rank_up_land') {
+      handleRankUpLand();
+    } else if (action === 'skip_rank_up') {
+      handleSkipRankUp();
+    } else if (action === 'super_lucky_roll') {
+      handleRollForSuperLucky();
+    } else if (action === 'venue_pass_choice') {
+      handleVenuePassChoice(payload.draw);
+    } else if (action === 'event_card_confirm') {
+      handleEventCardConfirm(payload.resultPayload);
+    } else if (action === 'casino_finish') {
+      handleCasinoFinish(payload.netProfit);
+    } else if (action === 'sell_tile') {
+      handleSellTile(payload.tileId);
+    } else if (action === 'pay_debt_resume') {
+      handlePayDebtAndResume();
+    } else if (action === 'sell_all_hellowork') {
+      handleSellAllAndGoToHelloWork();
+    } else if (action === 'hellowork_roll') {
+      handleHelloWorkRoll();
+    } else if (action === 'next_turn') {
+      handleNextTurn();
+    }
+  };
+
+  // Helper for sending action if client, or executing if host/local
+  const executeOrSendAction = (actionName: string, extraPayload: any = {}, localExec: () => void) => {
+    if (isOnline && !isHost) {
+      onlineManager.sendToHost({
+        type: 'PLAYER_ACTION',
+        payload: { action: actionName, ...extraPayload },
+      });
+    } else {
+      localExec();
+    }
+  };
+
+  // Handle Game Setup - Local
+  const handleStartLocalGame = (newPlayers: Player[], newSettings: GameSettings) => {
+    onlineManager.cleanup();
+    setIsOnline(false);
+    setIsHost(true);
+    setMyPlayerId('p1');
+    setOnlineRoomCode('');
+    setShowOnlineLobby(false);
+
     setPlayers(newPlayers);
     setSettings(newSettings);
-    // Reset tiles
     setTiles(
       INITIAL_TILES.map((t) => ({
         ...t,
@@ -116,11 +329,129 @@ export default function App() {
       {
         id: 'start',
         timestamp: Date.now(),
-        text: `ゲームスタート！目標金額は ${newSettings.targetMoney} マニーです。`,
+        text: `ゲームスタート！目標金額は ${newSettings.targetMoney.toLocaleString()} マニーです。`,
         type: 'roll',
       },
     ]);
     setGamePhase('waiting_roll');
+  };
+
+  // Handle Online Room Creation
+  const handleCreateOnlineRoom = (
+    hostPlayer: { name: string; avatar: string },
+    targetMoney: number,
+    roomCode: string
+  ) => {
+    const code = roomCode.trim().toUpperCase();
+    setOnlineRoomCode(code);
+    setIsOnline(true);
+    setIsHost(true);
+    setMyPlayerId('p1');
+
+    const hostP: Player = {
+      id: 'p1',
+      name: hostPlayer.name || 'ホスト',
+      isAi: false,
+      color: 'red',
+      avatar: hostPlayer.avatar || '🚗',
+      money: 1000,
+      position: 0,
+      inHelloWork: false,
+      hasRentExemption: false,
+      hasSuperLucky: false,
+      totalLaps: 0,
+    };
+
+    setPlayers([hostP]);
+    setSettings((s) => ({ ...s, targetMoney }));
+    setTiles(INITIAL_TILES.map((t) => ({ ...t, ownerId: null, rank: 0 })));
+
+    onlineManager.createRoom(
+      code,
+      (readyCode) => {
+        setOnlineRoomCode(readyCode);
+        setShowOnlineLobby(true);
+      },
+      (err) => {
+        alert('部屋の作成に失敗しました。別のコードを試してください。');
+        console.error(err);
+      }
+    );
+  };
+
+  // Handle Online Room Join
+  const handleJoinOnlineRoom = (
+    guestPlayer: { name: string; avatar: string },
+    roomCode: string
+  ) => {
+    const code = roomCode.trim().toUpperCase();
+    setOnlineRoomCode(code);
+    setIsOnline(true);
+    setIsHost(false);
+
+    onlineManager.joinRoom(
+      code,
+      () => {
+        // Send join request to host
+        onlineManager.sendToHost({
+          type: 'JOIN_REQUEST',
+          payload: guestPlayer,
+        });
+      },
+      (err) => {
+        alert('部屋への参加に失敗しました。部屋コードを確認してください。');
+        console.error(err);
+      }
+    );
+  };
+
+  // Host starts online game from lobby
+  const handleStartOnlineGame = () => {
+    setShowOnlineLobby(false);
+    setTiles(INITIAL_TILES.map((t) => ({ ...t, ownerId: null, rank: 0 })));
+    setCurrentPlayerIndex(0);
+    setActivePriceFluctuation(null);
+    setCurrentEventCard(null);
+    setWinner(null);
+    setBankruptcyDebt(null);
+    setShowCasinoModal(false);
+    const initialLogs: GameLog[] = [
+      {
+        id: 'start_online',
+        timestamp: Date.now(),
+        text: `オンライン対戦スタート！目標は ${settings.targetMoney.toLocaleString()} マニー！`,
+        type: 'roll',
+      },
+    ];
+    setLogs(initialLogs);
+    setGamePhase('waiting_roll');
+
+    const initialState: GameStateSync = {
+      players,
+      currentPlayerIndex: 0,
+      tiles: INITIAL_TILES.map((t) => ({ ...t, ownerId: null, rank: 0 })),
+      gamePhase: 'waiting_roll',
+      currentDice: 1,
+      activePriceFluctuation: null,
+      currentEventCard: null,
+      logs: initialLogs,
+      winner: null,
+      settings,
+      bankruptcyDebt: null,
+    };
+
+    onlineManager.broadcast({
+      type: 'START_GAME',
+      payload: initialState,
+    });
+  };
+
+  // Leave Lobby
+  const handleLeaveLobby = () => {
+    onlineManager.cleanup();
+    setIsOnline(false);
+    setShowOnlineLobby(false);
+    setGamePhase('setup');
   };
 
   // Check victory condition
@@ -129,7 +460,8 @@ export default function App() {
       if (p.money >= settings.targetMoney) {
         setWinner(p);
         setGamePhase('game_over');
-        addLog(`🎉 ${p.name} が目標金額 ${settings.targetMoney}マニーに到達！勝利！`, p.id, 'win');
+        addLog(`🎉 ${p.name} が目標金額 ${settings.targetMoney.toLocaleString()}マニーに到達！勝利！`, p.id, 'win');
+        broadcastStateIfHost({ winner: p, gamePhase: 'game_over' });
         return true;
       }
     }
@@ -144,83 +476,96 @@ export default function App() {
     setCurrentPlayerIndex(nextIndex);
     const nextPlayer = players[nextIndex];
 
-    // Check if price fluctuation expired
+    let newFluctuation = activePriceFluctuation;
     if (
       activePriceFluctuation &&
       activePriceFluctuation.expiresOnPlayerTurn === nextPlayer.id
     ) {
+      newFluctuation = null;
       setActivePriceFluctuation(null);
       addLog('価格変動の効果が終了し、通常の支払額に戻りました。');
     }
 
-    // Check if next player is in Hello Work
+    let nextPhase: GamePhase = 'waiting_roll';
     if (nextPlayer.inHelloWork) {
-      setGamePhase('hellowork_turn');
+      nextPhase = 'hellowork_turn';
       addLog(
         `💼 ${nextPlayer.name} はハローワークでのターンです。サイコロを振って給料を獲得します。`,
         nextPlayer.id
       );
-    } else {
-      setGamePhase('waiting_roll');
     }
+    setGamePhase(nextPhase);
+
+    broadcastStateIfHost({
+      currentPlayerIndex: nextIndex,
+      gamePhase: nextPhase,
+      activePriceFluctuation: newFluctuation,
+    });
   };
 
   // Hello Work Turn Roll
   const handleHelloWorkRoll = () => {
-    if (isRolling) return;
-    setIsRolling(true);
-
-    setTimeout(() => {
-      const roll = Math.floor(Math.random() * 6) + 1;
-      setCurrentDice(roll);
-      setIsRolling(false);
-
-      const salary = roll * 100;
-      sounds.playCoin();
-
-      const updatedPlayers = players.map((p, idx) => {
-        if (idx === currentPlayerIndex) {
-          return {
-            ...p,
-            money: p.money + salary,
-            inHelloWork: false, // Recovery turn complete!
-          };
-        }
-        return p;
-      });
-
-      setPlayers(updatedPlayers);
-      addLog(
-        `💼 ${currentPlayer.name} はハローワークでサイコロ【${roll}】を出して ${salary}マニーを獲得！次のターンから行動できます。`,
-        currentPlayer.id,
-        'money'
-      );
-
-      if (checkVictory(updatedPlayers)) return;
+    executeOrSendAction('hellowork_roll', {}, () => {
+      if (isRolling) return;
+      setIsRolling(true);
 
       setTimeout(() => {
-        handleNextTurn();
-      }, getDelay(1000));
-    }, getDelay(800));
+        const roll = Math.floor(Math.random() * 6) + 1;
+        setCurrentDice(roll);
+        setIsRolling(false);
+
+        const salary = roll * 100;
+        sounds.playCoin();
+
+        const updatedPlayers = players.map((p, idx) => {
+          if (idx === currentPlayerIndex) {
+            return {
+              ...p,
+              money: p.money + salary,
+              inHelloWork: false,
+            };
+          }
+          return p;
+        });
+
+        setPlayers(updatedPlayers);
+        addLog(
+          `💼 ${currentPlayer.name} はハローワークでサイコロ【${roll}】を出して ${salary}マニーを獲得！次のターンから行動できます。`,
+          currentPlayer.id,
+          'money'
+        );
+
+        broadcastStateIfHost({ players: updatedPlayers, currentDice: roll });
+
+        if (checkVictory(updatedPlayers)) return;
+
+        setTimeout(() => {
+          handleNextTurn();
+        }, getDelay(1000));
+      }, getDelay(800));
+    });
   };
 
   // Standard Dice Roll
   const handleRollDice = () => {
-    if (isRolling || gamePhase !== 'waiting_roll') return;
-    setIsRolling(true);
+    executeOrSendAction('roll_dice', {}, () => {
+      if (isRolling || gamePhase !== 'waiting_roll') return;
+      setIsRolling(true);
 
-    setTimeout(() => {
-      const roll = Math.floor(Math.random() * 6) + 1;
-      setCurrentDice(roll);
-      setIsRolling(false);
-      setGamePhase('moving');
+      setTimeout(() => {
+        const roll = Math.floor(Math.random() * 6) + 1;
+        setCurrentDice(roll);
+        setIsRolling(false);
+        setGamePhase('moving');
 
-      addLog(`🎲 ${currentPlayer.name} はサイコロで【${roll}】を出しました。`, currentPlayer.id, 'roll');
-      movePlayerStepByStep(roll);
-    }, getDelay(800));
+        addLog(`🎲 ${currentPlayer.name} はサイコロで【${roll}】を出しました。`, currentPlayer.id, 'roll');
+        broadcastStateIfHost({ currentDice: roll, gamePhase: 'moving' });
+        movePlayerStepByStep(roll);
+      }, getDelay(800));
+    });
   };
 
-  // Smooth Step-by-Step Movement
+  // Step-by-Step Movement
   const movePlayerStepByStep = (totalSteps: number) => {
     let currentStep = 0;
     const startPos = currentPlayer.position;
@@ -234,21 +579,16 @@ export default function App() {
 
       sounds.playStep();
 
-      // Check if passed/landed on Start (Index 0)
-      if (currentPos === 0) {
-        passedStart = true;
-      }
+      if (currentPos === 0) passedStart = true;
+      if (currentPos === 12 && currentStep < totalSteps) passedVenue = true;
 
-      // Check if passed Venue (Index 12) during movement (not landing on 12)
-      if (currentPos === 12 && currentStep < totalSteps) {
-        passedVenue = true;
-      }
-
-      setPlayers((prev) =>
-        prev.map((p, idx) =>
+      setPlayers((prev) => {
+        const updated = prev.map((p, idx) =>
           idx === currentPlayerIndex ? { ...p, position: currentPos } : p
-        )
-      );
+        );
+        broadcastStateIfHost({ players: updated });
+        return updated;
+      });
 
       if (currentStep >= totalSteps) {
         clearInterval(interval);
@@ -266,7 +606,6 @@ export default function App() {
   ) => {
     let currentMoney = currentPlayer.money;
 
-    // Apply Start Salary if passed or landed on start
     if (passedStart) {
       currentMoney += settings.startBonus;
       sounds.playCoin();
@@ -288,61 +627,66 @@ export default function App() {
         : p
     );
     setPlayers(updatedPlayers);
+    broadcastStateIfHost({ players: updatedPlayers });
 
     if (checkVictory(updatedPlayers)) return;
 
-    // Next: If passed Event Venue (and didn't land on it), prompt for 50M draw
     if (passedVenue && finalPos !== 12) {
       setGamePhase('venue_pass_prompt');
+      broadcastStateIfHost({ gamePhase: 'venue_pass_prompt' });
       return;
     }
 
-    // Otherwise directly resolve landing square
     resolveLandingSquare(finalPos, updatedPlayers);
   };
 
-  // Choice when passing Event Venue: Pay 50 to draw card or skip
+  // Choice when passing Event Venue
   const handleVenuePassChoice = (draw: boolean) => {
-    if (draw) {
-      if (currentPlayer.money < 50) {
-        addLog(`マニーが不足しているため、カードを引けませんでした。`, currentPlayer.id);
+    executeOrSendAction('venue_pass_choice', { draw }, () => {
+      if (draw) {
+        if (currentPlayer.money < 50) {
+          addLog(`マニーが不足しているため、カードを引けませんでした。`, currentPlayer.id);
+          resolveLandingSquare(currentPlayer.position, players);
+          return;
+        }
+
+        const updated = players.map((p, idx) =>
+          idx === currentPlayerIndex ? { ...p, money: p.money - 50 } : p
+        );
+        setPlayers(updated);
+        sounds.playCard();
+        addLog(
+          `🎪 ${currentPlayer.name} はイベント会場の通過時に50マニーを支払い、カードを引きます！`,
+          currentPlayer.id
+        );
+
+        const card = drawRandomEventCard();
+        setCurrentEventCard(card);
+        setGamePhase('event_card_modal');
+        broadcastStateIfHost({
+          players: updated,
+          currentEventCard: card,
+          gamePhase: 'event_card_modal',
+        });
+      } else {
+        addLog(`🎪 ${currentPlayer.name} はイベント会場の通過カードを見送りました。`, currentPlayer.id);
         resolveLandingSquare(currentPlayer.position, players);
-        return;
       }
-
-      const updated = players.map((p, idx) =>
-        idx === currentPlayerIndex ? { ...p, money: p.money - 50 } : p
-      );
-      setPlayers(updated);
-      sounds.playCard();
-      addLog(
-        `🎪 ${currentPlayer.name} はイベント会場の通過時に50マニーを支払い、カードを引きます！`,
-        currentPlayer.id
-      );
-
-      // Draw card
-      const card = drawRandomEventCard();
-      setCurrentEventCard(card);
-      setGamePhase('event_card_modal');
-    } else {
-      addLog(`🎪 ${currentPlayer.name} はイベント会場の通過カードを見送りました。`, currentPlayer.id);
-      resolveLandingSquare(currentPlayer.position, players);
-    }
+    });
   };
 
-  // Resolve Landing on a tile
+  // Resolve Landing Square
   const resolveLandingSquare = (tileId: number, currentPlayersState: Player[]) => {
     const tile = tiles[tileId];
     const player = currentPlayersState[currentPlayerIndex];
 
-    // 1. Start Tile (Tile 0)
     if (tile.type === 'start') {
       addLog(`🏁 ${player.name} はスタート地点に到着しました。`, player.id);
       setGamePhase('turn_end');
+      broadcastStateIfHost({ gamePhase: 'turn_end' });
       return;
     }
 
-    // 2. Hello Work (Tile 6)
     if (tile.type === 'hellowork') {
       const partTimeBonus = 100;
       sounds.playCoin();
@@ -357,19 +701,19 @@ export default function App() {
       );
       if (checkVictory(updated)) return;
       setGamePhase('turn_end');
+      broadcastStateIfHost({ players: updated, gamePhase: 'turn_end' });
       return;
     }
 
-    // 3. Casino (Tile 18)
     if (tile.type === 'casino') {
       sounds.playCard();
       addLog(`🎰 ${player.name} はカジノに到着しました！一攫千金に挑戦！`, player.id);
       setShowCasinoModal(true);
       setGamePhase('casino_modal');
+      broadcastStateIfHost({ gamePhase: 'casino_modal' });
       return;
     }
 
-    // 4. Event Venue (Tile 12) or Event Tiles (3, 8, 13, 18)
     if (tile.type === 'venue' || tile.type === 'event') {
       sounds.playCard();
       const card = drawRandomEventCard();
@@ -380,47 +724,50 @@ export default function App() {
         'event'
       );
       setGamePhase('event_card_modal');
+      broadcastStateIfHost({
+        currentEventCard: card,
+        gamePhase: 'event_card_modal',
+      });
       return;
     }
 
-    // 5. Land Tile
     if (tile.type === 'land') {
-      // Case 5A: Unowned Land
       if (!tile.ownerId) {
         addLog(
           `🏡 ${player.name} は未契約の No.${tile.landNumber}「${tile.name}」(契約金: ${tile.cost}M) に止まりました。`,
           player.id
         );
         setGamePhase('land_action');
+        broadcastStateIfHost({ gamePhase: 'land_action' });
         return;
       }
 
-      // Case 5B: Own Land
       if (tile.ownerId === player.id) {
         if (tile.rank === 0) {
           addLog(
-            `🏡 ${player.name} は自身の No.${tile.landNumber}「${tile.name}」に止まりました。ランクアップ（費用: ${(tile.cost || 0) * 2}M）が可能です。`,
+            `🏡 ${player.name} は自身の No.${tile.landNumber}「${tile.name}」に止まりました。ランクアップが可能です。`,
             player.id
           );
           setGamePhase('land_action');
+          broadcastStateIfHost({ gamePhase: 'land_action' });
         } else {
           addLog(
             `🏡 ${player.name} は自身の No.${tile.landNumber}「${tile.name}」(★Lv.2 最高ランク) に止まりました。`,
             player.id
           );
           setGamePhase('turn_end');
+          broadcastStateIfHost({ gamePhase: 'turn_end' });
         }
         return;
       }
 
-      // Case 5C: Opponent's Land -> Rent Payment
       const owner = currentPlayersState.find((p) => p.id === tile.ownerId);
       if (!owner) {
         setGamePhase('turn_end');
+        broadcastStateIfHost({ gamePhase: 'turn_end' });
         return;
       }
 
-      // Check Rent Exemption Card (支払い免除)
       if (player.hasRentExemption) {
         sounds.playBuy();
         const updated = currentPlayersState.map((p, idx) =>
@@ -432,10 +779,10 @@ export default function App() {
           player.id
         );
         setGamePhase('turn_end');
+        broadcastStateIfHost({ players: updated, gamePhase: 'turn_end' });
         return;
       }
 
-      // Calculate rent
       const rentCalculation = calculateLandRent(
         tile,
         tiles,
@@ -453,7 +800,6 @@ export default function App() {
         player.id
       );
 
-      // Check if player has enough money
       if (player.money >= totalRent) {
         sounds.playCoin();
         const updated = currentPlayersState.map((p) => {
@@ -471,105 +817,45 @@ export default function App() {
         if (checkVictory(updated)) return;
 
         setGamePhase('turn_end');
+        broadcastStateIfHost({ players: updated, gamePhase: 'turn_end' });
       } else {
-        // Player cannot afford -> Bankruptcy Flow!
         sounds.playBuzzer();
         addLog(
           `⚠️ ${player.name} は ${totalRent}マニーを支払う所持金がありません！破産処理に入ります。`,
           player.id,
           'bankrupt'
         );
-        setBankruptcyDebt({
+        const debtData = {
           debtAmount: totalRent,
           creditorPlayerId: owner.id,
-        });
+        };
+        setBankruptcyDebt(debtData);
         setGamePhase('bankruptcy_modal');
+        broadcastStateIfHost({
+          bankruptcyDebt: debtData,
+          gamePhase: 'bankruptcy_modal',
+        });
       }
     }
   };
 
   // Land Contract Action (Buy)
   const handleBuyLand = () => {
-    const tile = tiles[currentPlayer.position];
-    if (!tile || tile.type !== 'land' || !tile.cost) return;
+    executeOrSendAction('buy_land', {}, () => {
+      const tile = tiles[currentPlayer.position];
+      if (!tile || tile.type !== 'land' || !tile.cost) return;
 
-    if (currentPlayer.money < tile.cost) {
-      addLog(`所持金が不足しているため契約できませんでした。`, currentPlayer.id);
-      setGamePhase('turn_end');
-      return;
-    }
-
-    sounds.playBuy();
-
-    // Deduct cost and assign owner
-    const updatedPlayers = players.map((p, idx) =>
-      idx === currentPlayerIndex ? { ...p, money: p.money - tile.cost! } : p
-    );
-    const updatedTiles = tiles.map((t) =>
-      t.id === tile.id ? { ...t, ownerId: currentPlayer.id } : t
-    );
-
-    setPlayers(updatedPlayers);
-    setTiles(updatedTiles);
-
-    addLog(
-      `🎉 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を ${tile.cost}マニーで契約しました！`,
-      currentPlayer.id,
-      'land'
-    );
-
-    setGamePhase('turn_end');
-  };
-
-  // Special Lucky Roll for Land Contract (私は豪運！)
-  const handleRollForSuperLucky = () => {
-    const tile = tiles[currentPlayer.position];
-    if (!tile || !tile.cost) return;
-
-    setIsRolling(true);
-
-    setTimeout(() => {
-      const roll = Math.floor(Math.random() * 6) + 1;
-      setCurrentDice(roll);
-      setIsRolling(false);
-
-      let finalCost = 0;
-      if (roll === 1) {
-        finalCost = tile.cost! * 2;
-        sounds.playBuzzer();
-        addLog(
-          `🎲 【私は豪運！】サイコロ出目は【1】！痛恨の倍額（${finalCost}マニー）で契約！`,
-          currentPlayer.id
-        );
-      } else {
-        finalCost = 0;
-        sounds.playWin();
-        addLog(
-          `✨ 【私は豪運！】サイコロ出目は【${roll}】！見事【タダ（0マニー）】で契約成立！！`,
-          currentPlayer.id
-        );
-      }
-
-      // Check if player has enough money if rolled 1
-      if (currentPlayer.money < finalCost) {
-        // Can't afford doubled price
-        addLog(`倍額の契約金が払えないため、契約できませんでした…`, currentPlayer.id);
-        const updatedPlayers = players.map((p, idx) =>
-          idx === currentPlayerIndex ? { ...p, hasSuperLucky: false } : p
-        );
-        setPlayers(updatedPlayers);
+      if (currentPlayer.money < tile.cost) {
+        addLog(`所持金が不足しているため契約できませんでした。`, currentPlayer.id);
         setGamePhase('turn_end');
+        broadcastStateIfHost({ gamePhase: 'turn_end' });
         return;
       }
 
+      sounds.playBuy();
+
       const updatedPlayers = players.map((p, idx) =>
-        idx === currentPlayerIndex
-          ? {
-              ...p,
-              money: p.money - finalCost,
-              hasSuperLucky: false, // Consumed
-            }
-          : p
+        idx === currentPlayerIndex ? { ...p, money: p.money - tile.cost! } : p
       );
       const updatedTiles = tiles.map((t) =>
         t.id === tile.id ? { ...t, ownerId: currentPlayer.id } : t
@@ -577,51 +863,145 @@ export default function App() {
 
       setPlayers(updatedPlayers);
       setTiles(updatedTiles);
+
+      addLog(
+        `🎉 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を ${tile.cost}マニーで契約しました！`,
+        currentPlayer.id,
+        'land'
+      );
+
       setGamePhase('turn_end');
-    }, getDelay(800));
+      broadcastStateIfHost({
+        players: updatedPlayers,
+        tiles: updatedTiles,
+        gamePhase: 'turn_end',
+      });
+    });
+  };
+
+  // Super Lucky Roll for Land Contract
+  const handleRollForSuperLucky = () => {
+    executeOrSendAction('super_lucky_roll', {}, () => {
+      const tile = tiles[currentPlayer.position];
+      if (!tile || !tile.cost) return;
+
+      setIsRolling(true);
+
+      setTimeout(() => {
+        const roll = Math.floor(Math.random() * 6) + 1;
+        setCurrentDice(roll);
+        setIsRolling(false);
+
+        let finalCost = 0;
+        if (roll === 1) {
+          finalCost = tile.cost! * 2;
+          sounds.playBuzzer();
+          addLog(
+            `🎲 【私は豪運！】サイコロ出目は【1】！痛恨の倍額（${finalCost}マニー）で契約！`,
+            currentPlayer.id
+          );
+        } else {
+          finalCost = 0;
+          sounds.playWin();
+          addLog(
+            `✨ 【私は豪運！】サイコロ出目は【${roll}】！見事【タダ（0マニー）】で契約成立！！`,
+            currentPlayer.id
+          );
+        }
+
+        if (currentPlayer.money < finalCost) {
+          addLog(`倍額の契約金が払えないため、契約できませんでした…`, currentPlayer.id);
+          const updatedPlayers = players.map((p, idx) =>
+            idx === currentPlayerIndex ? { ...p, hasSuperLucky: false } : p
+          );
+          setPlayers(updatedPlayers);
+          setGamePhase('turn_end');
+          broadcastStateIfHost({ players: updatedPlayers, gamePhase: 'turn_end' });
+          return;
+        }
+
+        const updatedPlayers = players.map((p, idx) =>
+          idx === currentPlayerIndex
+            ? {
+                ...p,
+                money: p.money - finalCost,
+                hasSuperLucky: false,
+              }
+            : p
+        );
+        const updatedTiles = tiles.map((t) =>
+          t.id === tile.id ? { ...t, ownerId: currentPlayer.id } : t
+        );
+
+        setPlayers(updatedPlayers);
+        setTiles(updatedTiles);
+        setGamePhase('turn_end');
+
+        broadcastStateIfHost({
+          players: updatedPlayers,
+          tiles: updatedTiles,
+          currentDice: roll,
+          gamePhase: 'turn_end',
+        });
+      }, getDelay(800));
+    });
   };
 
   const handleSkipBuyLand = () => {
-    addLog(`${currentPlayer.name} は土地の契約を見送りました。`, currentPlayer.id);
-    setGamePhase('turn_end');
+    executeOrSendAction('skip_buy_land', {}, () => {
+      addLog(`${currentPlayer.name} は土地の契約を見送りました。`, currentPlayer.id);
+      setGamePhase('turn_end');
+      broadcastStateIfHost({ gamePhase: 'turn_end' });
+    });
   };
 
   // Rank up Land
   const handleRankUpLand = () => {
-    const tile = tiles[currentPlayer.position];
-    if (!tile || !tile.cost || tile.rank !== 0) return;
+    executeOrSendAction('rank_up_land', {}, () => {
+      const tile = tiles[currentPlayer.position];
+      if (!tile || !tile.cost || tile.rank !== 0) return;
 
-    const rankUpCost = tile.cost * 2;
-    if (currentPlayer.money < rankUpCost) {
-      addLog(`所持金が不足しているためランクアップできませんでした。`, currentPlayer.id);
+      const rankUpCost = tile.cost * 2;
+      if (currentPlayer.money < rankUpCost) {
+        addLog(`所持金が不足しているためランクアップできませんでした。`, currentPlayer.id);
+        setGamePhase('turn_end');
+        broadcastStateIfHost({ gamePhase: 'turn_end' });
+        return;
+      }
+
+      sounds.playRankUp();
+
+      const updatedPlayers = players.map((p, idx) =>
+        idx === currentPlayerIndex ? { ...p, money: p.money - rankUpCost } : p
+      );
+      const updatedTiles = tiles.map((t) =>
+        t.id === tile.id ? { ...t, rank: 1 } : t
+      );
+
+      setPlayers(updatedPlayers);
+      setTiles(updatedTiles);
+
+      addLog(
+        `⭐ ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」をランクアップ（★Lv.2）しました！家賃が2倍になります！`,
+        currentPlayer.id,
+        'rankup'
+      );
+
       setGamePhase('turn_end');
-      return;
-    }
-
-    sounds.playRankUp();
-
-    const updatedPlayers = players.map((p, idx) =>
-      idx === currentPlayerIndex ? { ...p, money: p.money - rankUpCost } : p
-    );
-    const updatedTiles = tiles.map((t) =>
-      t.id === tile.id ? { ...t, rank: 1 } : t
-    );
-
-    setPlayers(updatedPlayers);
-    setTiles(updatedTiles);
-
-    addLog(
-      `⭐ ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」をランクアップ（★Lv.2）しました！家賃が2倍になります！`,
-      currentPlayer.id,
-      'rankup'
-    );
-
-    setGamePhase('turn_end');
+      broadcastStateIfHost({
+        players: updatedPlayers,
+        tiles: updatedTiles,
+        gamePhase: 'turn_end',
+      });
+    });
   };
 
   const handleSkipRankUp = () => {
-    addLog(`${currentPlayer.name} はランクアップを見送りました。`, currentPlayer.id);
-    setGamePhase('turn_end');
+    executeOrSendAction('skip_rank_up', {}, () => {
+      addLog(`${currentPlayer.name} はランクアップを見送りました。`, currentPlayer.id);
+      setGamePhase('turn_end');
+      broadcastStateIfHost({ gamePhase: 'turn_end' });
+    });
   };
 
   // Event Card Resolution
@@ -632,255 +1012,285 @@ export default function App() {
     majorDamageChoice?: 'pay' | 'relinquish';
     majorDamageTileId?: number;
   }) => {
-    if (!currentEventCard) return;
+    executeOrSendAction('event_card_confirm', { resultPayload: payload }, () => {
+      if (!currentEventCard) return;
 
-    const card = currentEventCard;
-    setCurrentEventCard(null);
+      const card = currentEventCard;
+      setCurrentEventCard(null);
 
-    let updatedPlayers = [...players];
-    const player = updatedPlayers[currentPlayerIndex];
+      let updatedPlayers = [...players];
+      const player = updatedPlayers[currentPlayerIndex];
 
-    switch (card.type) {
-      case 'windfall': {
-        // +200 money
-        sounds.playCoin();
-        player.money += 200;
-        addLog(`💰 ${player.name} は臨時収入で +200マニーを獲得！`, player.id, 'money');
-        break;
-      }
-      case 'sudden_expense': {
-        // -100 money
-        sounds.playBuzzer();
-        if (player.money < 100) {
-          setBankruptcyDebt({
-            debtAmount: 100,
-            creditorPlayerId: null,
-          });
-          setGamePhase('bankruptcy_modal');
-          return;
-        } else {
-          player.money -= 100;
-          addLog(`💸 ${player.name} は急な出費で 100マニーを支払いました。`, player.id, 'money');
+      switch (card.type) {
+        case 'windfall': {
+          sounds.playCoin();
+          player.money += 200;
+          addLog(`💰 ${player.name} は臨時収入で +200マニーを獲得！`, player.id, 'money');
+          break;
         }
-        break;
-      }
-      case 'price_fluctuation': {
-        if (payload && payload.fluctuationMultiplier) {
-          setActivePriceFluctuation({
-            activeByPlayerId: player.id,
-            multiplier: payload.fluctuationMultiplier,
-            expiresOnPlayerTurn: player.id,
-          });
-          addLog(
-            `📈 価格変動発動！全土地の支払額が【${payload.fluctuationMultiplier}倍】になりました！（次の ${player.name} のターンまで）`
-          );
+        case 'sudden_expense': {
+          sounds.playBuzzer();
+          if (player.money < 100) {
+            const debtData = {
+              debtAmount: 100,
+              creditorPlayerId: null,
+            };
+            setBankruptcyDebt(debtData);
+            setGamePhase('bankruptcy_modal');
+            broadcastStateIfHost({
+              bankruptcyDebt: debtData,
+              gamePhase: 'bankruptcy_modal',
+            });
+            return;
+          } else {
+            player.money -= 100;
+            addLog(`💸 ${player.name} は急な出費で 100マニーを支払いました。`, player.id, 'money');
+          }
+          break;
         }
-        break;
-      }
-      case 'rent_exemption': {
-        player.hasRentExemption = true;
-        sounds.playBuy();
-        addLog(
-          `🛡️ ${player.name} は【支払い免除】カードを手に入れました！`,
-          player.id
-        );
-        break;
-      }
-      case 'super_lucky': {
-        player.hasSuperLucky = true;
-        sounds.playBuy();
-        addLog(
-          `🎲 ${player.name} は【私は豪運！】カードを手に入れました！`,
-          player.id
-        );
-        break;
-      }
-      case 'major_damage': {
-        if (payload && payload.majorDamageTileId !== undefined) {
-          const targetTile = tiles.find((t) => t.id === payload.majorDamageTileId);
-          if (targetTile) {
-            if (payload.majorDamageChoice === 'pay') {
-              player.money -= 200;
-              sounds.playCoin();
-              addLog(
-                `⚠️ ${player.name} は修繕費200マニーを支払い、No.${targetTile.landNumber}「${targetTile.name}」を守りました！`,
-                player.id
-              );
-            } else {
-              sounds.playBuzzer();
-              setTiles((prev) =>
-                prev.map((t) =>
-                  t.id === targetTile.id ? { ...t, ownerId: null, rank: 0 } : t
-                )
-              );
-              addLog(
-                `⚠️ ${player.name} は No.${targetTile.landNumber}「${targetTile.name}」を手放し、未契約に戻りました。`,
-                player.id
-              );
+        case 'price_fluctuation': {
+          if (payload && payload.fluctuationMultiplier) {
+            setActivePriceFluctuation({
+              activeByPlayerId: player.id,
+              multiplier: payload.fluctuationMultiplier,
+              expiresOnPlayerTurn: player.id,
+            });
+            addLog(
+              `📈 価格変動発動！全土地の支払額が【${payload.fluctuationMultiplier}倍】になりました！（次の ${player.name} のターンまで）`
+            );
+          }
+          break;
+        }
+        case 'rent_exemption': {
+          player.hasRentExemption = true;
+          sounds.playBuy();
+          addLog(`🛡️ ${player.name} は【支払い免除】カードを手に入れました！`, player.id);
+          break;
+        }
+        case 'super_lucky': {
+          player.hasSuperLucky = true;
+          sounds.playBuy();
+          addLog(`🎲 ${player.name} は【私は豪運！】カードを手に入れました！`, player.id);
+          break;
+        }
+        case 'major_damage': {
+          if (payload && payload.majorDamageTileId !== undefined) {
+            const targetTile = tiles.find((t) => t.id === payload.majorDamageTileId);
+            if (targetTile) {
+              if (payload.majorDamageChoice === 'pay') {
+                player.money -= 200;
+                sounds.playCoin();
+                addLog(
+                  `⚠️ ${player.name} は修繕費200マニーを支払い、No.${targetTile.landNumber}「${targetTile.name}」を守りました！`,
+                  player.id
+                );
+              } else {
+                sounds.playBuzzer();
+                setTiles((prev) =>
+                  prev.map((t) =>
+                    t.id === targetTile.id ? { ...t, ownerId: null, rank: 0 } : t
+                  )
+                );
+                addLog(
+                  `⚠️ ${player.name} は No.${targetTile.landNumber}「${targetTile.name}」を手放し、未契約に戻りました。`,
+                  player.id
+                );
+              }
             }
           }
+          break;
         }
-        break;
-      }
-      case 'lottery': {
-        if (payload && payload.lotteryMoney !== undefined) {
-          player.money += payload.lotteryMoney;
-          addLog(
-            `🎫 宝くじ結果: ${player.name} は賞金 ${payload.lotteryMoney}マニーを獲得！`,
-            player.id,
-            'money'
-          );
+        case 'lottery': {
+          if (payload && payload.lotteryMoney !== undefined) {
+            player.money += payload.lotteryMoney;
+            addLog(
+              `🎫 宝くじ結果: ${player.name} は賞金 ${payload.lotteryMoney}マニーを獲得！`,
+              player.id,
+              'money'
+            );
+          }
+          break;
         }
-        break;
-      }
-      case 'disaster': {
-        const ownedCount = tiles.filter((t) => t.ownerId === player.id).length;
-        const disasterCost = ownedCount * 100;
-        if (player.money < disasterCost) {
-          setBankruptcyDebt({
-            debtAmount: disasterCost,
-            creditorPlayerId: null,
-          });
-          setGamePhase('bankruptcy_modal');
-          return;
-        } else {
-          sounds.playBuzzer();
-          player.money -= disasterCost;
-          addLog(
-            `⚡ 災害発生！ ${player.name} は所有地${ownedCount}件分の修繕費 ${disasterCost}マニーを支払いました。`,
-            player.id,
-            'money'
-          );
+        case 'disaster': {
+          const ownedCount = tiles.filter((t) => t.ownerId === player.id).length;
+          const disasterCost = ownedCount * 100;
+          if (player.money < disasterCost) {
+            const debtData = {
+              debtAmount: disasterCost,
+              creditorPlayerId: null,
+            };
+            setBankruptcyDebt(debtData);
+            setGamePhase('bankruptcy_modal');
+            broadcastStateIfHost({
+              bankruptcyDebt: debtData,
+              gamePhase: 'bankruptcy_modal',
+            });
+            return;
+          } else {
+            sounds.playBuzzer();
+            player.money -= disasterCost;
+            addLog(
+              `⚡ 災害発生！ ${player.name} は所有地${ownedCount}件分の修繕費 ${disasterCost}マニーを支払いました。`,
+              player.id,
+              'money'
+            );
+          }
+          break;
         }
-        break;
       }
-    }
 
-    setPlayers(updatedPlayers);
+      setPlayers(updatedPlayers);
 
-    if (checkVictory(updatedPlayers)) return;
+      if (checkVictory(updatedPlayers)) return;
 
-    // If venue pass draw was resolving, now resolve landing square!
-    if (gamePhase === 'event_card_modal') {
-      setGamePhase('turn_end');
-    }
+      if (gamePhase === 'event_card_modal') {
+        setGamePhase('turn_end');
+      }
+
+      broadcastStateIfHost({
+        players: updatedPlayers,
+        gamePhase: 'turn_end',
+        currentEventCard: null,
+      });
+    });
   };
 
   // Casino Minigame Finished
   const handleCasinoFinish = (netProfit: number) => {
-    setShowCasinoModal(false);
+    executeOrSendAction('casino_finish', { netProfit }, () => {
+      setShowCasinoModal(false);
 
-    const updated = players.map((p, idx) =>
-      idx === currentPlayerIndex ? { ...p, money: p.money + netProfit } : p
-    );
-    setPlayers(updated);
+      const updated = players.map((p, idx) =>
+        idx === currentPlayerIndex ? { ...p, money: p.money + netProfit } : p
+      );
+      setPlayers(updated);
 
-    if (netProfit > 0) {
-      addLog(`🎰 カジノ大勝利！ +${netProfit}マニー獲得！`, currentPlayer.id, 'money');
-    } else if (netProfit < 0) {
-      addLog(`🎰 カジノ敗北… ${netProfit}マニー。`, currentPlayer.id, 'money');
-    } else {
-      addLog(`🎰 カジノを後にしました。`, currentPlayer.id);
-    }
+      if (netProfit > 0) {
+        addLog(`🎰 カジノ大勝利！ +${netProfit}マニー獲得！`, currentPlayer.id, 'money');
+      } else if (netProfit < 0) {
+        addLog(`🎰 カジノ敗北… ${netProfit}マニー。`, currentPlayer.id, 'money');
+      } else {
+        addLog(`🎰 カジノを後にしました。`, currentPlayer.id);
+      }
 
-    if (checkVictory(updated)) return;
+      if (checkVictory(updated)) return;
 
-    setGamePhase('turn_end');
+      setGamePhase('turn_end');
+      broadcastStateIfHost({ players: updated, gamePhase: 'turn_end' });
+    });
   };
 
   // Bankruptcy: Sell Individual Tile
   const handleSellTile = (tileId: number) => {
-    const tile = tiles.find((t) => t.id === tileId);
-    if (!tile || !tile.cost) return;
+    executeOrSendAction('sell_tile', { tileId }, () => {
+      const tile = tiles.find((t) => t.id === tileId);
+      if (!tile || !tile.cost) return;
 
-    const sellPrice = Math.floor(tile.cost / 2);
+      const sellPrice = Math.floor(tile.cost / 2);
 
-    // Update tile (reset owner & rank)
-    setTiles((prev) =>
-      prev.map((t) => (t.id === tileId ? { ...t, ownerId: null, rank: 0 } : t))
-    );
-
-    // Give cash to current player
-    setPlayers((prev) =>
-      prev.map((p, idx) =>
+      const updatedTiles = tiles.map((t) =>
+        t.id === tileId ? { ...t, ownerId: null, rank: 0 } : t
+      );
+      const updatedPlayers = players.map((p, idx) =>
         idx === currentPlayerIndex ? { ...p, money: p.money + sellPrice } : p
-      )
-    );
+      );
 
-    addLog(
-      `💸 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を半額（${sellPrice}マニー）で売却しました。`,
-      currentPlayer.id
-    );
+      setTiles(updatedTiles);
+      setPlayers(updatedPlayers);
+
+      addLog(
+        `💸 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を半額（${sellPrice}マニー）で売却しました。`,
+        currentPlayer.id
+      );
+
+      broadcastStateIfHost({
+        tiles: updatedTiles,
+        players: updatedPlayers,
+      });
+    });
   };
 
   // Bankruptcy: Pay Debt & Resume
   const handlePayDebtAndResume = () => {
-    if (!bankruptcyDebt) return;
-    const debt = bankruptcyDebt.debtAmount;
+    executeOrSendAction('pay_debt_resume', {}, () => {
+      if (!bankruptcyDebt) return;
+      const debt = bankruptcyDebt.debtAmount;
 
-    const updated = players.map((p) => {
-      if (p.id === currentPlayer.id) {
-        return { ...p, money: p.money - debt };
-      }
-      if (bankruptcyDebt.creditorPlayerId && p.id === bankruptcyDebt.creditorPlayerId) {
-        return { ...p, money: p.money + debt };
-      }
-      return p;
+      const updated = players.map((p) => {
+        if (p.id === currentPlayer.id) {
+          return { ...p, money: p.money - debt };
+        }
+        if (bankruptcyDebt.creditorPlayerId && p.id === bankruptcyDebt.creditorPlayerId) {
+          return { ...p, money: p.money + debt };
+        }
+        return p;
+      });
+
+      setPlayers(updated);
+      setBankruptcyDebt(null);
+      addLog(`✅ ${currentPlayer.name} は負債 ${debt}マニーを無事に完済しました！`, currentPlayer.id);
+      setGamePhase('turn_end');
+
+      broadcastStateIfHost({
+        players: updated,
+        bankruptcyDebt: null,
+        gamePhase: 'turn_end',
+      });
     });
-
-    setPlayers(updated);
-    setBankruptcyDebt(null);
-    addLog(`✅ ${currentPlayer.name} は負債 ${debt}マニーを無事に完済しました！`, currentPlayer.id);
-    setGamePhase('turn_end');
   };
 
-  // Bankruptcy: Sell all and go to Hello Work (Tile 6)
+  // Bankruptcy: Sell all and go to Hello Work
   const handleSellAllAndGoToHelloWork = () => {
-    if (!bankruptcyDebt) return;
+    executeOrSendAction('sell_all_hellowork', {}, () => {
+      if (!bankruptcyDebt) return;
 
-    // Reset all lands owned by current player
-    setTiles((prev) =>
-      prev.map((t) =>
+      const updatedTiles = tiles.map((t) =>
         t.ownerId === currentPlayer.id ? { ...t, ownerId: null, rank: 0 } : t
-      )
-    );
+      );
 
-    // Move player to Hello Work (Tile 6), reset money to 0, flag inHelloWork
-    const updated = players.map((p) => {
-      if (p.id === currentPlayer.id) {
-        return {
-          ...p,
-          money: 0,
-          position: 6, // Hello Work
-          inHelloWork: true,
-        };
-      }
-      if (bankruptcyDebt.creditorPlayerId && p.id === bankruptcyDebt.creditorPlayerId) {
-        // Creditor receives whatever player could offer
-        return { ...p, money: p.money + Math.max(0, currentPlayer.money) };
-      }
-      return p;
+      const updated = players.map((p) => {
+        if (p.id === currentPlayer.id) {
+          return {
+            ...p,
+            money: 0,
+            position: 6,
+            inHelloWork: true,
+          };
+        }
+        if (bankruptcyDebt.creditorPlayerId && p.id === bankruptcyDebt.creditorPlayerId) {
+          return { ...p, money: p.money + Math.max(0, currentPlayer.money) };
+        }
+        return p;
+      });
+
+      setTiles(updatedTiles);
+      setPlayers(updated);
+      setBankruptcyDebt(null);
+      sounds.playBuzzer();
+
+      addLog(
+        `💼 ${currentPlayer.name} は全財産を清算しハローワークマスに移動しました！次ターン、サイコロ出目×100マニーで再起を図ります！`,
+        currentPlayer.id,
+        'bankrupt'
+      );
+
+      setGamePhase('turn_end');
+
+      broadcastStateIfHost({
+        tiles: updatedTiles,
+        players: updated,
+        bankruptcyDebt: null,
+        gamePhase: 'turn_end',
+      });
     });
-
-    setPlayers(updated);
-    setBankruptcyDebt(null);
-    sounds.playBuzzer();
-
-    addLog(
-      `💼 ${currentPlayer.name} は全財産を清算しハローワークマスに移動しました！次ターン、サイコロ出目×100マニーで再起を図ります！`,
-      currentPlayer.id,
-      'bankrupt'
-    );
-
-    setGamePhase('turn_end');
   };
 
-  // CPU Automated Turn Handling
+  // CPU Automated Turn Handling (Host only)
   useEffect(() => {
     if (gamePhase === 'game_over' || gamePhase === 'setup') return;
+    if (isOnline && !isHost) return; // Only host drives CPU
     if (!currentPlayer || !currentPlayer.isAi) return;
 
-    // CPU Turn Handling with smooth timeouts
     const timer = setTimeout(() => {
       if (gamePhase === 'hellowork_turn') {
         handleHelloWorkRoll();
@@ -918,20 +1328,17 @@ export default function App() {
         if (bet.choice === 'skip') {
           handleCasinoFinish(0);
         } else {
-          // Play a simple automated bet
           const roll = Math.floor(Math.random() * 6) + 1;
           const won = (bet.choice === 'high' && roll >= 4) || (bet.choice === 'low' && roll <= 3);
           const profit = won ? bet.betAmount : -bet.betAmount;
           handleCasinoFinish(profit);
         }
       } else if (gamePhase === 'bankruptcy_modal') {
-        // CPU Auto-liquidation
         const ownedTiles = tiles.filter((t) => t.ownerId === currentPlayer.id);
         const tileToSell = AIHelper.selectLandToSell(currentPlayer, ownedTiles);
         if (tileToSell) {
           handleSellTile(tileToSell.id);
         } else {
-          // No more lands or still cannot pay
           if (bankruptcyDebt && currentPlayer.money >= bankruptcyDebt.debtAmount) {
             handlePayDebtAndResume();
           } else {
@@ -944,10 +1351,13 @@ export default function App() {
     }, getDelay(1000));
 
     return () => clearTimeout(timer);
-  }, [gamePhase, currentPlayer, tiles, bankruptcyDebt]);
+  }, [gamePhase, currentPlayer, tiles, bankruptcyDebt, isOnline, isHost]);
+
+  // Is it my turn to act?
+  const isMyTurn = !isOnline || (currentPlayer && currentPlayer.id === myPlayerId);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-slate-900 to-sky-950 text-slate-100 flex flex-col items-center justify-start p-2 sm:p-4 select-none font-sans overflow-x-hidden">
+    <div className="h-screen max-h-screen overflow-hidden bg-gradient-to-br from-indigo-950 via-slate-900 to-sky-950 text-slate-100 flex flex-col items-center justify-between p-1 sm:p-2 select-none font-sans">
       {/* Game Header Bar */}
       {gamePhase !== 'setup' && (
         <GameHeader
@@ -955,6 +1365,7 @@ export default function App() {
           currentPlayerId={currentPlayer?.id || ''}
           settings={settings}
           tiles={tiles}
+          onlineRoomCode={onlineRoomCode}
           onToggleSound={() =>
             setSettings((s) => ({ ...s, soundEnabled: !s.soundEnabled }))
           }
@@ -964,14 +1375,18 @@ export default function App() {
               gameSpeed: s.gameSpeed === 'normal' ? 'fast' : 'normal',
             }))
           }
-          onNewGame={() => setGamePhase('setup')}
+          onNewGame={() => {
+            onlineManager.cleanup();
+            setIsOnline(false);
+            setGamePhase('setup');
+          }}
           onOpenRules={() => setShowRulesModal(true)}
         />
       )}
 
       {/* Main 7x7 Board Area */}
       {gamePhase !== 'setup' && currentPlayer && (
-        <main className="w-full flex-1 flex items-center justify-center">
+        <main className="w-full flex-1 flex items-center justify-center overflow-hidden">
           <Board
             tiles={tiles}
             players={players}
@@ -981,6 +1396,8 @@ export default function App() {
             gamePhase={gamePhase}
             activePriceFluctuation={activePriceFluctuation}
             logs={logs}
+            myPlayerId={myPlayerId}
+            isOnline={isOnline}
             onRollDice={handleRollDice}
             onSelectTile={(t) => setSelectedTileForDetail(t)}
             onBuyLand={handleBuyLand}
@@ -1000,10 +1417,27 @@ export default function App() {
 
       {/* 1. Setup / New Game Modal */}
       {gamePhase === 'setup' && (
-        <StartGameModal onStartGame={handleStartNewGame} />
+        <StartGameModal
+          onStartLocalGame={handleStartLocalGame}
+          onCreateOnlineRoom={handleCreateOnlineRoom}
+          onJoinOnlineRoom={handleJoinOnlineRoom}
+        />
       )}
 
-      {/* 2. Event Card Modal */}
+      {/* 2. Online Lobby Modal */}
+      {showOnlineLobby && (
+        <OnlineLobbyModal
+          isHost={isHost}
+          roomCode={onlineRoomCode}
+          players={players}
+          myPlayerId={myPlayerId}
+          settings={settings}
+          onStartGame={handleStartOnlineGame}
+          onLeaveLobby={handleLeaveLobby}
+        />
+      )}
+
+      {/* 3. Event Card Modal */}
       {gamePhase === 'event_card_modal' && currentEventCard && currentPlayer && (
         <EventCardModal
           card={currentEventCard}
@@ -1013,12 +1447,12 @@ export default function App() {
         />
       )}
 
-      {/* 3. Casino Modal */}
+      {/* 4. Casino Modal */}
       {showCasinoModal && currentPlayer && (
         <CasinoModal player={currentPlayer} onFinish={handleCasinoFinish} />
       )}
 
-      {/* 4. Bankruptcy Modal */}
+      {/* 5. Bankruptcy Modal */}
       {gamePhase === 'bankruptcy_modal' && bankruptcyDebt && currentPlayer && (
         <BankruptcyModal
           player={currentPlayer}
@@ -1030,7 +1464,7 @@ export default function App() {
         />
       )}
 
-      {/* 5. Tile Inspection Detail Modal */}
+      {/* 6. Tile Inspection Detail Modal */}
       <TileDetailModal
         tile={selectedTileForDetail}
         players={players}
@@ -1039,19 +1473,23 @@ export default function App() {
         onClose={() => setSelectedTileForDetail(null)}
       />
 
-      {/* 6. Rules Modal */}
+      {/* 7. Rules Modal */}
       {showRulesModal && (
         <RulesModal onClose={() => setShowRulesModal(false)} />
       )}
 
-      {/* 7. Victory Modal */}
+      {/* 8. Victory Modal */}
       {winner && (
         <VictoryModal
           winner={winner}
           players={players}
           tiles={tiles}
           settings={settings}
-          onPlayAgain={() => setGamePhase('setup')}
+          onPlayAgain={() => {
+            onlineManager.cleanup();
+            setIsOnline(false);
+            setGamePhase('setup');
+          }}
         />
       )}
     </div>

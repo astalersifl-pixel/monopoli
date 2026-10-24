@@ -14,6 +14,7 @@ export interface Player {
   hasRentExemption: boolean; // 支払い免除 card held
   hasSuperLucky: boolean; // 私は豪運！ card held
   totalLaps: number;
+  peerId?: string;
 }
 
 export type TileType = 'start' | 'land' | 'event' | 'venue' | 'hellowork' | 'casino';
@@ -86,3 +87,21 @@ export interface GameSettings {
   soundEnabled: boolean;
   gameSpeed: 'normal' | 'fast';
 }
+
+export interface GameStateSync {
+  players: Player[];
+  currentPlayerIndex: number;
+  tiles: Tile[];
+  gamePhase: GamePhase;
+  currentDice: number;
+  activePriceFluctuation: ActivePriceFluctuation | null;
+  currentEventCard: EventCard | null;
+  logs: GameLog[];
+  winner: Player | null;
+  settings: GameSettings;
+  bankruptcyDebt: {
+    debtAmount: number;
+    creditorPlayerId: string | null;
+  } | null;
+}
+
