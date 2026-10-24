@@ -100,7 +100,7 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
                 >
                   <div className="flex items-center gap-2">
                     <span className="w-5 text-center font-black">
-                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '4位'}
+                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}位`}
                     </span>
                     <span>{p.avatar}</span>
                     <span className="truncate max-w-[100px]">{p.name}</span>
