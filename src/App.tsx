@@ -947,7 +947,7 @@ export default function App() {
   }, [gamePhase, currentPlayer, tiles, bankruptcyDebt]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-2 sm:p-4 select-none font-sans overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-slate-900 to-sky-950 text-slate-100 flex flex-col items-center justify-start p-2 sm:p-4 select-none font-sans overflow-x-hidden">
       {/* Game Header Bar */}
       {gamePhase !== 'setup' && (
         <GameHeader
