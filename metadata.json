@@ -1,0 +1,6 @@
+{
+  "name": "ものぽりぃ (Monopolii)",
+  "description": "7×7マスの盤面でサイコロを振り、土地の契約・ランクアップ・多彩なイベントカードで目標金額を目指す本格すごろくボードゲーム",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
