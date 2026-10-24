@@ -45,6 +45,8 @@ export const TileCell: React.FC<TileCellProps> = ({
         return 'bg-emerald-50 border-emerald-400 text-emerald-900';
       case 'amber':
         return 'bg-amber-50 border-amber-400 text-amber-900';
+      case 'purple':
+        return 'bg-purple-50 border-purple-400 text-purple-900';
       default:
         return '';
     }
@@ -61,6 +63,8 @@ export const TileCell: React.FC<TileCellProps> = ({
         return 'bg-emerald-500 text-white';
       case 'amber':
         return 'bg-amber-500 text-white';
+      case 'purple':
+        return 'bg-purple-500 text-white';
       default:
         return 'bg-slate-700 text-white';
     }
@@ -215,7 +219,9 @@ export const TileCell: React.FC<TileCellProps> = ({
                   ? 'bg-sky-500 ring-sky-400'
                   : p.color === 'emerald'
                   ? 'bg-emerald-500 ring-emerald-400'
-                  : 'bg-amber-500 ring-amber-400'
+                  : p.color === 'amber'
+                  ? 'bg-amber-500 ring-amber-400'
+                  : 'bg-purple-500 ring-purple-400'
               } animate-bounce-subtle`}
               title={`${p.name} (所持金: ${p.money}マニー)`}
             >
