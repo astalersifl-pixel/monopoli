@@ -150,8 +150,8 @@ export const INITIAL_TILES: Tile[] = [
   {
     id: 12,
     type: 'venue',
-    name: 'イベント会場',
-    description: '止まると無料、通過時は50マニーでカード1枚取得可能！',
+    name: '占いの館',
+    description: '止まった時に100マニーで占いのカードを取得可能！（引かないことも可能）通過時は何も起きません。',
     row: 0,
     col: 0,
   },
@@ -294,44 +294,159 @@ export const INITIAL_TILES: Tile[] = [
 ];
 
 /**
- * Checks whether a land tile has an adjacent land owned by the same player.
- * Definition:
- * On the circular board track, we find the closest prior land tile and closest subsequent land tile.
- * If either one is owned by the same owner, adjacent bonus is active!
+ * 隣接ボーナス（支払額1.5倍）が発生する指定ペア（landNumberベース）
+ * 1・2、4・5、6・7、9・10、11・12、14・15、16・17、19・20
  */
-export function isAdjacentLandOwned(tileId: number, tiles: Tile[]): boolean {
-  const currentTile = tiles[tileId];
-  if (!currentTile || currentTile.type !== 'land' || !currentTile.ownerId) {
+export const ADJACENT_PAIRS: readonly [number, number][] = [
+  [1, 2],
+  [4, 5],
+  [6, 7],
+  [9, 10],
+  [11, 12],
+  [14, 15],
+  [16, 17],
+  [19, 20],
+] as const;
+
+export interface MonopolyGroup {
+  name: string;
+  landNumbers: number[];
+  theme: string;
+}
+
+export const MONOPOLY_GROUPS: MonopolyGroup[] = [
+  {
+    name: '住宅街',
+    landNumbers: [1, 2, 4, 5],
+    theme: 'emerald',
+  },
+  {
+    name: '港湾街',
+    landNumbers: [6, 7, 9, 10],
+    theme: 'sky',
+  },
+  {
+    name: '商業街',
+    landNumbers: [11, 12, 14, 15],
+    theme: 'amber',
+  },
+  {
+    name: '高級街',
+    landNumbers: [16, 17, 19, 20],
+    theme: 'purple',
+  },
+];
+
+/**
+ * 指定の土地について、エリア独占ボーナス（全4マス同一所有者）が成立しているか判定
+ */
+export function isAreaMonopoly(tileIdOrTile: number | Tile, tiles: Tile[]): boolean {
+  const currentTile = typeof tileIdOrTile === 'number' ? tiles[tileIdOrTile] : tileIdOrTile;
+  if (!currentTile || currentTile.type !== 'land' || !currentTile.ownerId || !currentTile.landNumber) {
     return false;
   }
+  const landNum = currentTile.landNumber;
   const ownerId = currentTile.ownerId;
+
+  const group = MONOPOLY_GROUPS.find((g) => g.landNumbers.includes(landNum));
+  if (!group) return false;
+
+  return group.landNumbers.every((num) => {
+    const tile = tiles.find((t) => t.type === 'land' && t.landNumber === num);
+    return tile && tile.ownerId === ownerId;
+  });
+}
+
+/**
+ * 指定の土地について、隣接ペアボーナス（指定ペア両方同一所有者）が成立しているか判定
+ * 1・2、4・5、6・7、9・10、11・12、14・15、16・17、19・20
+ */
+export function isAdjacentLandOwned(tileIdOrTile: number | Tile, tiles: Tile[]): boolean {
+  const currentTile = typeof tileIdOrTile === 'number' ? tiles[tileIdOrTile] : tileIdOrTile;
+  if (!currentTile || currentTile.type !== 'land' || !currentTile.ownerId || !currentTile.landNumber) {
+    return false;
+  }
+  const landNum = currentTile.landNumber;
+  const ownerId = currentTile.ownerId;
+
+  const pair = ADJACENT_PAIRS.find(([a, b]) => a === landNum || b === landNum);
+  if (!pair) return false;
+
+  const partnerLandNum = pair[0] === landNum ? pair[1] : pair[0];
+  const partnerTile = tiles.find((t) => t.type === 'land' && t.landNumber === partnerLandNum);
+  return !!partnerTile && partnerTile.ownerId === ownerId;
+}
+
+/**
+ * グループ内の所有進捗を取得（例: 3/4マス保有）
+ */
+export function getMonopolyProgress(
+  tileIdOrTile: number | Tile,
+  tiles: Tile[]
+): {
+  groupName: string;
+  ownedCount: number;
+  totalCount: number;
+  isMonopoly: boolean;
+  landNumbers: number[];
+} | null {
+  const currentTile = typeof tileIdOrTile === 'number' ? tiles[tileIdOrTile] : tileIdOrTile;
+  if (!currentTile || currentTile.type !== 'land' || !currentTile.landNumber) {
+    return null;
+  }
+  const landNum = currentTile.landNumber;
+  const group = MONOPOLY_GROUPS.find((g) => g.landNumbers.includes(landNum));
+  if (!group) return null;
+
+  const ownerId = currentTile.ownerId;
+  const ownedCount = ownerId
+    ? group.landNumbers.filter((num) => {
+        const t = tiles.find((tile) => tile.type === 'land' && tile.landNumber === num);
+        return t && t.ownerId === ownerId;
+      }).length
+    : 0;
+
+  return {
+    groupName: group.name,
+    ownedCount,
+    totalCount: group.landNumbers.length,
+    isMonopoly: ownerId ? ownedCount === group.landNumbers.length : false,
+    landNumbers: [...group.landNumbers],
+  };
+}
+
+/**
+ * 全ての土地（16マス）が契約済みかどうか判定（バブル期突入判定）
+ */
+export function areAllLandsContracted(tiles: Tile[]): boolean {
   const landTiles = tiles.filter((t) => t.type === 'land');
-  const currentIndexInLands = landTiles.findIndex((t) => t.id === tileId);
-  if (currentIndexInLands === -1) return false;
-
-  const totalLands = landTiles.length;
-  const prevLand = landTiles[(currentIndexInLands - 1 + totalLands) % totalLands];
-  const nextLand = landTiles[(currentIndexInLands + 1) % totalLands];
-
-  return prevLand.ownerId === ownerId || nextLand.ownerId === ownerId;
+  return (
+    landTiles.length > 0 &&
+    landTiles.every((t) => t.ownerId !== null && t.ownerId !== undefined)
+  );
 }
 
 /**
  * Calculates current rent for a tile, considering:
  * - Base rent
  * - Rank up (2x base rent)
- * - Adjacent land bonus (1.5x)
+ * - Area Monopoly bonus (2.0x, 1・2・4・5, 6・7・9・10, 11・12・14・15, 16・17・19・20)
+ * - Adjacent pair bonus (1.5x, 1・2, 4・5, 6・7, 9・10, 11・12, 14・15, 16・17, 19・20)
  * - Global price fluctuation multiplier (0.5x or 2.0x, default 1.0)
+ * - Bubble era bonus (+100 money)
  */
 export function calculateLandRent(
   tile: Tile,
   tiles: Tile[],
-  fluctuationMultiplier: number = 1.0
+  fluctuationMultiplier: number = 1.0,
+  isBubbleEra: boolean = false
 ): {
   rent: number;
   baseRent: number;
   isRankedUp: boolean;
   isAdjacentBonus: boolean;
+  isMonopolyBonus: boolean;
+  isBubbleEra: boolean;
   fluctuationMultiplier: number;
 } {
   const baseRent = tile.baseRent || 0;
@@ -339,9 +454,13 @@ export function calculateLandRent(
   // Rankup doubles the rent
   let rent = isRankedUp ? baseRent * 2 : baseRent;
 
-  // Adjacent bonus: 1.5x
-  const isAdjacentBonus = isAdjacentLandOwned(tile.id, tiles);
-  if (isAdjacentBonus) {
+  const isMonopoly = isAreaMonopoly(tile, tiles);
+  const isAdjacent = isAdjacentLandOwned(tile, tiles);
+
+  // 独占ボーナス（支払額2倍）または隣接ボーナス（支払額1.5倍）
+  if (isMonopoly) {
+    rent = Math.round(rent * 2.0);
+  } else if (isAdjacent) {
     rent = Math.round(rent * 1.5);
   }
 
@@ -350,11 +469,18 @@ export function calculateLandRent(
     rent = Math.round(rent * fluctuationMultiplier);
   }
 
+  // バブル期ボーナス：支払額 +100マニー
+  if (isBubbleEra) {
+    rent += 100;
+  }
+
   return {
     rent: Math.max(1, rent),
     baseRent,
     isRankedUp,
-    isAdjacentBonus,
+    isAdjacentBonus: isAdjacent,
+    isMonopolyBonus: isMonopoly,
+    isBubbleEra,
     fluctuationMultiplier,
   };
 }

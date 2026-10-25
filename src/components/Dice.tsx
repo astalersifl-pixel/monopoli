@@ -94,7 +94,11 @@ export const Dice: React.FC<DiceProps> = ({
             : 'rotateX(0deg) rotateY(0deg) scale(1)',
           transition: isRolling ? 'transform 0.08s ease-in-out' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
         }}
-        className={`relative ${sizeClasses[size]} bg-white border-2 border-slate-300 shadow-xl flex items-center justify-center cursor-pointer select-none active:scale-95 disabled:cursor-not-allowed group hover:border-indigo-400 hover:shadow-indigo-200/50`}
+        className={`relative ${sizeClasses[size]} bg-white border-2 border-slate-300 shadow-xl flex items-center justify-center cursor-pointer select-none active:scale-95 disabled:cursor-not-allowed group hover:border-indigo-400 hover:shadow-indigo-200/50 ${
+          !isRolling && value > 0
+            ? 'ring-4 ring-amber-400/90 shadow-xl shadow-amber-400/30'
+            : ''
+        }`}
       >
         {/* Subtle 3D gradient & edge highlights */}
         <div className="absolute inset-0 bg-gradient-to-br from-white via-slate-50 to-slate-200 rounded-[inherit] pointer-events-none" />
@@ -105,7 +109,13 @@ export const Dice: React.FC<DiceProps> = ({
       </button>
 
       {label && (
-        <span className="text-xs font-bold text-slate-600 tracking-wide bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+        <span
+          className={`tracking-wider rounded-full shadow-md transition-all ${
+            isRolling
+              ? 'text-[11px] sm:text-xs font-bold text-slate-300 bg-slate-800/90 px-3 py-0.5 border border-slate-700 animate-pulse'
+              : 'text-xs sm:text-sm font-black text-slate-950 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 px-4 py-1 border-2 border-amber-300 animate-scale-up'
+          }`}
+        >
           {label}
         </span>
       )}

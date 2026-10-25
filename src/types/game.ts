@@ -13,6 +13,9 @@ export interface Player {
   inHelloWork: boolean; // Bankrupt recovery status
   hasRentExemption: boolean; // 支払い免除 card held
   hasSuperLucky: boolean; // 私は豪運！ card held
+  hasInfoManipulation?: boolean; // 情報操作: 次の番、出目を決められる
+  hasSurgeRent?: boolean; // 支払額上昇: 一度だけ自分の土地への支払額が2倍
+  skipNextTurn?: boolean; // 次から頑張る: 次のターン1回休み
   totalLaps: number;
   peerId?: string;
 }
@@ -42,7 +45,14 @@ export type EventCardType =
   | 'super_lucky' // 私は豪運！: サイコロ1以外で無料、1なら倍
   | 'major_damage' // 大損害！: ランダム土地1つに200払わないと未契約化
   | 'lottery' // 宝くじに挑戦: 1:500, 2-5:50, 6:0
-  | 'disaster'; // 災害発生！: 所有地×100支払い
+  | 'disaster' // 災害発生！: 所有地×50支払い
+  | 'info_manipulation' // 情報操作: 次の番、出るサイコロの目を決めることができる
+  | 'surge_rent' // 支払額上昇: 一度だけ自分の土地に止まったプレイヤーの支払金が倍になる
+  | 'real_estate_sale' // 不動産セール: 土地の契約金がすべて半額になる。全プレイヤー合わせて3回購入で元に戻る
+  | 'transfer_rights' // 権利の譲渡: 他のプレイヤーの土地を契約金を支払えば購入できる（ランクアップは引き継がれない）
+  | 'feel_good_roll' // なんだか気分がいい！: もう一度サイコロを振る
+  | 'slacking_off' // 次から頑張る: 100マニーを受け取る。次のターン1回休み
+  | 'drinking_party'; // 飲み会をしよう！: 全員占いの館に集める。その後全員が50マニー消費
 
 export interface EventCard {
   type: EventCardType;
@@ -74,15 +84,16 @@ export type GamePhase =
   | 'land_action' // Land buy/rankup prompt
   | 'event_card_modal' // Viewing event card
   | 'event_dice_roll' // Rolling for price_fluctuation, lottery, or super_lucky
-  | 'venue_pass_prompt' // Passing venue, pay 50 to draw?
+  | 'fortune_hall_prompt' // 占いの館: Pay 100 to draw or skip
   | 'casino_modal' // Casino game
+  | 'heaven_and_hell_modal' // 天国と地獄マス
   | 'bankruptcy_modal' // Selling land to pay debt
   | 'hellowork_turn' // Roll dice at Hello Work
   | 'turn_end'
   | 'game_over';
 
 export interface GameSettings {
-  targetMoney: number; // 5000 or 10000
+  targetMoney: number; // 2000 or 4000
   startBonus: number; // 200
   soundEnabled: boolean;
   gameSpeed: 'normal' | 'fast';
@@ -95,6 +106,7 @@ export interface GameStateSync {
   gamePhase: GamePhase;
   currentDice: number;
   activePriceFluctuation: ActivePriceFluctuation | null;
+  realEstateSalePurchasesRemaining?: number;
   currentEventCard: EventCard | null;
   logs: GameLog[];
   winner: Player | null;
@@ -103,5 +115,6 @@ export interface GameStateSync {
     debtAmount: number;
     creditorPlayerId: string | null;
   } | null;
+  isBubbleEra?: boolean;
 }
 

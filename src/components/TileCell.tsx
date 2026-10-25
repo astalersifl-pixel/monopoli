@@ -1,15 +1,70 @@
 import React from 'react';
 import { Tile, Player, ActivePriceFluctuation } from '../types/game';
 import { calculateLandRent } from '../utils/boardData';
-import { Flag, Building2, Sparkles, Briefcase, Dices, Award } from 'lucide-react';
+import { Flag, Briefcase, Dices } from 'lucide-react';
 
 interface TileCellProps {
   tile: Tile;
   players: Player[];
   allTiles: Tile[];
   activePriceFluctuation: ActivePriceFluctuation | null;
+  isRealEstateSaleActive?: boolean;
+  isBubbleEra?: boolean;
   onSelectTile: (tile: Tile) => void;
   isCurrentPlayerHere?: boolean;
+}
+
+// 4 Districts on the board for land grouping
+interface DistrictInfo {
+  name: string;
+  theme: string;
+  badgeBg: string;
+  badgeText: string;
+  icon: string;
+}
+
+function getDistrictInfo(tileId: number): DistrictInfo | null {
+  // Right side (No.1, 2, 4, 5): 住宅街 (Residential)
+  if ([1, 2, 4, 5].includes(tileId)) {
+    return {
+      name: '住宅街',
+      theme: 'emerald',
+      badgeBg: 'bg-emerald-100',
+      badgeText: 'text-emerald-800',
+      icon: '🏡',
+    };
+  }
+  // Top side (No.6, 7, 9, 10): 港湾街 (Port/Waterfront)
+  if ([7, 8, 10, 11].includes(tileId)) {
+    return {
+      name: '港湾街',
+      theme: 'sky',
+      badgeBg: 'bg-sky-100',
+      badgeText: 'text-sky-800',
+      icon: '⚓',
+    };
+  }
+  // Left side (No.11, 12, 14, 15): 商業街 (Commercial)
+  if ([13, 14, 16, 17].includes(tileId)) {
+    return {
+      name: '商業街',
+      theme: 'amber',
+      badgeBg: 'bg-amber-100',
+      badgeText: 'text-amber-800',
+      icon: '🛍️',
+    };
+  }
+  // Bottom side (No.16, 17, 19, 20): 高級街 (Luxury)
+  if ([19, 20, 22, 23].includes(tileId)) {
+    return {
+      name: '高級街',
+      theme: 'purple',
+      badgeBg: 'bg-purple-100',
+      badgeText: 'text-purple-800',
+      icon: '👑',
+    };
+  }
+  return null;
 }
 
 export const TileCell: React.FC<TileCellProps> = ({
@@ -17,11 +72,14 @@ export const TileCell: React.FC<TileCellProps> = ({
   players,
   allTiles,
   activePriceFluctuation,
+  isRealEstateSaleActive = false,
+  isBubbleEra = false,
   onSelectTile,
   isCurrentPlayerHere,
 }) => {
   const playersOnTile = players.filter((p) => p.position === tile.id);
   const owner = players.find((p) => p.id === tile.ownerId);
+  const district = getDistrictInfo(tile.id);
 
   // Calculate rent if it's a land
   const rentInfo =
@@ -29,44 +87,50 @@ export const TileCell: React.FC<TileCellProps> = ({
       ? calculateLandRent(
           tile,
           allTiles,
-          activePriceFluctuation ? activePriceFluctuation.multiplier : 1.0
+          activePriceFluctuation ? activePriceFluctuation.multiplier : 1.0,
+          isBubbleEra
         )
       : null;
 
-  // Background and border styles depending on tile type and owner
-  const getOwnerBgStyle = () => {
+  // Effective contract cost considering Real Estate Sale
+  const baseCost = tile.cost || 0;
+  const effectiveCost =
+    isRealEstateSaleActive && !owner ? Math.floor(baseCost / 2) : baseCost;
+
+  // Owner color styles
+  const getOwnerHeaderStyle = () => {
     if (!owner) return '';
     switch (owner.color) {
       case 'red':
-        return 'bg-rose-50 border-rose-400 text-rose-900';
+        return 'bg-gradient-to-r from-rose-500 to-rose-600 text-white';
       case 'blue':
-        return 'bg-sky-50 border-sky-400 text-sky-900';
+        return 'bg-gradient-to-r from-sky-500 to-sky-600 text-white';
       case 'emerald':
-        return 'bg-emerald-50 border-emerald-400 text-emerald-900';
+        return 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white';
       case 'amber':
-        return 'bg-amber-50 border-amber-400 text-amber-900';
+        return 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black';
       case 'purple':
-        return 'bg-purple-50 border-purple-400 text-purple-900';
+        return 'bg-gradient-to-r from-purple-500 to-purple-600 text-white';
       default:
-        return '';
+        return 'bg-slate-700 text-white';
     }
   };
 
-  const getOwnerBadgeColor = () => {
-    if (!owner) return '';
+  const getOwnerCardBorder = () => {
+    if (!owner) return 'border-slate-300/80 hover:border-slate-400';
     switch (owner.color) {
       case 'red':
-        return 'bg-rose-500 text-white';
+        return 'border-rose-400 bg-rose-50/70 shadow-rose-100';
       case 'blue':
-        return 'bg-sky-500 text-white';
+        return 'border-sky-400 bg-sky-50/70 shadow-sky-100';
       case 'emerald':
-        return 'bg-emerald-500 text-white';
+        return 'border-emerald-400 bg-emerald-50/70 shadow-emerald-100';
       case 'amber':
-        return 'bg-amber-500 text-white';
+        return 'border-amber-400 bg-amber-50/70 shadow-amber-100';
       case 'purple':
-        return 'bg-purple-500 text-white';
+        return 'border-purple-400 bg-purple-50/70 shadow-purple-100';
       default:
-        return 'bg-slate-700 text-white';
+        return 'border-slate-400 bg-slate-50';
     }
   };
 
@@ -75,161 +139,295 @@ export const TileCell: React.FC<TileCellProps> = ({
   return (
     <div
       onClick={() => onSelectTile(tile)}
-      className={`relative w-full h-full flex flex-col justify-between p-1.5 sm:p-2 cursor-pointer transition-all duration-200 select-none overflow-hidden rounded-xl border-2 ${
+      className={`relative w-full h-full flex flex-col justify-between cursor-pointer select-none overflow-hidden rounded-xl sm:rounded-2xl border-2 transition-all duration-150 ${
         isCurrentPlayerHere
-          ? 'ring-4 ring-amber-400/80 shadow-lg scale-[1.02] z-20'
+          ? 'ring-4 ring-amber-400 ring-offset-1 sm:ring-offset-2 z-20 shadow-xl scale-[1.03]'
           : 'hover:scale-[1.01] hover:shadow-md'
       } ${
-        owner
-          ? getOwnerBgStyle()
-          : isCorner
-          ? tile.type === 'start'
-            ? 'bg-gradient-to-br from-emerald-500 to-teal-700 text-white border-emerald-400 shadow-sm'
-            : tile.type === 'hellowork'
-            ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white border-amber-300 shadow-sm'
-            : tile.type === 'venue'
-            ? 'bg-gradient-to-br from-purple-600 to-indigo-700 text-white border-purple-300 shadow-sm'
-            : 'bg-gradient-to-br from-rose-600 to-pink-700 text-white border-rose-300 shadow-sm'
-          : tile.type === 'event'
-          ? 'bg-gradient-to-br from-indigo-50 to-purple-100 border-indigo-300 text-indigo-950'
-          : 'bg-white/95 border-slate-200 text-slate-800'
+        tile.type === 'land'
+          ? owner
+            ? getOwnerCardBorder()
+            : 'bg-white border-slate-300 shadow-xs'
+          : tile.type === 'start'
+          ? 'bg-gradient-to-br from-emerald-600 via-teal-700 to-emerald-800 text-white border-emerald-300 shadow-md'
+          : tile.type === 'hellowork'
+          ? 'bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700 text-white border-amber-300 shadow-md'
+          : tile.type === 'venue'
+          ? 'bg-gradient-to-br from-purple-700 via-indigo-800 to-purple-900 text-white border-purple-300 shadow-md'
+          : tile.type === 'casino'
+          ? isBubbleEra
+            ? 'bg-gradient-to-br from-amber-700 via-rose-900 to-indigo-950 text-white border-amber-400 shadow-md ring-2 ring-amber-300/60'
+            : 'bg-gradient-to-br from-rose-600 via-pink-700 to-rose-800 text-white border-rose-300 shadow-md'
+          : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-300 text-indigo-950 shadow-xs'
       }`}
+      title={`${tile.type === 'casino' && isBubbleEra ? '天国と地獄' : tile.name} (タップで詳細確認)`}
     >
-      {/* Top Header Row of Tile */}
-      <div className="flex items-center justify-between w-full">
-        {tile.type === 'land' && (
-          <div className="flex items-center gap-1">
-            <span className="inline-flex items-center justify-center text-[10px] sm:text-xs font-black px-1.5 py-0.5 rounded-md bg-slate-900 text-white shadow-xs">
-              {tile.landNumber}
-            </span>
-            {tile.rank ? (
-              <span className="inline-flex items-center text-[10px] sm:text-xs font-black px-1 py-0.5 rounded bg-amber-400 text-amber-950 shadow-xs animate-pulse">
-                ★Lv.2
-              </span>
-            ) : null}
-          </div>
-        )}
-
-        {tile.type === 'event' && (
-          <div className="flex items-center gap-1">
-            <span className="inline-flex items-center justify-center text-[10px] sm:text-xs font-black px-1.5 py-0.5 rounded-md bg-indigo-600 text-white shadow-xs">
-              {tile.landNumber}
-            </span>
-            <span className="text-[10px] sm:text-xs font-bold text-indigo-700 bg-indigo-200/80 px-1 rounded">
-              EVENT
-            </span>
-          </div>
-        )}
-
-        {isCorner && (
-          <span className="text-[9px] sm:text-[11px] font-black tracking-wider uppercase opacity-90">
-            {tile.type === 'start' && 'START'}
-            {tile.type === 'hellowork' && 'RESTART'}
-            {tile.type === 'venue' && 'SPECIAL'}
-            {tile.type === 'casino' && 'JACKPOT'}
-          </span>
-        )}
-
-        {/* Owner Avatar / Badge */}
-        {owner && (
+      {/* 1. TOP HEADER STRIP */}
+      {tile.type === 'land' ? (
+        owner ? (
+          // Owned Header Strip: Owner's color + Avatar + Name + Level
           <div
-            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold shadow-xs ${getOwnerBadgeColor()}`}
-            title={`所有者: ${owner.name}`}
+            className={`w-full flex items-center justify-between px-1.5 py-0.5 sm:py-1 ${getOwnerHeaderStyle()} shadow-2xs`}
           >
-            <span>{owner.avatar}</span>
-            <span className="hidden sm:inline truncate max-w-[42px]">{owner.name}</span>
-          </div>
-        )}
-
-        {/* Multiplier Tag (1.5x adjacent or 2x/0.5x fluctuation) */}
-        {rentInfo && rentInfo.isAdjacentBonus && (
-          <span
-            className="text-[9px] font-black bg-rose-500 text-white px-1 py-0.2 rounded shadow-xs"
-            title="隣接土地ボーナス 1.5倍"
-          >
-            1.5x
-          </span>
-        )}
-      </div>
-
-      {/* Middle: Name & Icon */}
-      <div className="my-auto py-0.5 flex flex-col items-center justify-center text-center">
-        {tile.type === 'start' && <Flag className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 text-amber-200" />}
-        {tile.type === 'hellowork' && (
-          <Briefcase className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 text-amber-200" />
-        )}
-        {tile.type === 'venue' && (
-          <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 text-amber-200 animate-spin-slow" />
-        )}
-        {tile.type === 'casino' && <Dices className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 text-yellow-300" />}
-
-        <div className="text-[11px] sm:text-xs font-black leading-tight line-clamp-1">
-          {tile.name}
-        </div>
-      </div>
-
-      {/* Bottom: Cost & Rent Info */}
-      <div className="w-full text-[10px] sm:text-[11px] font-bold leading-tight">
-        {tile.type === 'land' ? (
-          <div className="flex flex-col gap-0.5 bg-black/5 p-1 rounded-md">
-            <div className="flex justify-between items-center text-slate-500 text-[9px] sm:text-[10px]">
-              <span>契約</span>
-              <span className="font-black text-slate-800">{tile.cost}M</span>
-            </div>
-            <div className="flex justify-between items-center text-emerald-700">
-              <span>支払</span>
-              <span className="font-black text-emerald-800 sm:text-xs">
-                {rentInfo ? rentInfo.rent : tile.baseRent}M
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-[9px] sm:text-[11px] font-black tracking-tight shrink-0">
+                #{tile.landNumber}
               </span>
+              {tile.rank ? (
+                <span className="text-[8px] sm:text-[9px] font-black bg-amber-300 text-slate-950 px-1 py-0.2 rounded shadow-2xs shrink-0 animate-pulse">
+                  ★Lv.2
+                </span>
+              ) : null}
+              {rentInfo?.isMonopolyBonus && (
+                <span
+                  className="text-[8px] sm:text-[9px] font-black bg-yellow-300 text-amber-950 px-1 py-0.2 rounded shadow-2xs shrink-0"
+                  title="エリア独占ボーナス発動中 (支払額2倍)"
+                >
+                  👑独占
+                </span>
+              )}
             </div>
-          </div>
-        ) : tile.type === 'start' ? (
-          <div className="text-center text-[10px] sm:text-xs text-amber-200 font-black">
-            +200マニー
-          </div>
-        ) : tile.type === 'hellowork' ? (
-          <div className="text-center text-[9px] sm:text-[10px] text-amber-100 font-bold">
-            出目×100マニー
-          </div>
-        ) : tile.type === 'venue' ? (
-          <div className="text-center text-[9px] sm:text-[10px] text-purple-100 font-bold">
-            カードGET
-          </div>
-        ) : tile.type === 'casino' ? (
-          <div className="text-center text-[9px] sm:text-[10px] text-rose-100 font-bold">
-            一攫千金
+            <div className="flex items-center gap-0.5 truncate text-[9px] sm:text-[10px] font-bold">
+              <span className="shrink-0">{owner.avatar}</span>
+              <span className="truncate max-w-[48px] sm:max-w-[64px]">{owner.name}</span>
+            </div>
           </div>
         ) : (
-          <div className="text-center text-[9px] sm:text-[10px] text-indigo-600 font-bold">
+          // Unowned Header Strip: District theme + Land Number + Unowned tag
+          <div className="w-full flex items-center justify-between px-1.5 py-0.5 sm:py-1 bg-slate-100/90 border-b border-slate-200">
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="inline-flex items-center justify-center text-[9px] sm:text-[10px] font-black px-1 rounded bg-slate-800 text-white shrink-0">
+                #{tile.landNumber}
+              </span>
+              {district && (
+                <span
+                  className={`text-[8px] sm:text-[9px] font-bold px-1 py-0.2 rounded hidden xs:inline shrink-0 ${district.badgeBg} ${district.badgeText}`}
+                >
+                  {district.name}
+                </span>
+              )}
+            </div>
+            {isRealEstateSaleActive ? (
+              <span className="text-[8px] sm:text-[9px] font-black bg-emerald-500 text-white px-1 py-0.2 rounded shrink-0 animate-pulse">
+                50%引
+              </span>
+            ) : (
+              <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 shrink-0">
+                空地
+              </span>
+            )}
+          </div>
+        )
+      ) : isCorner ? (
+        // Corner Header Strip
+        <div className="w-full flex items-center justify-between px-1.5 py-0.5 sm:py-1 bg-black/25 text-white/90 border-b border-white/20">
+          <span className="text-[8px] sm:text-[9px] font-black tracking-wider uppercase">
+            {tile.type === 'start' && '🏁 START'}
+            {tile.type === 'hellowork' && '💼 再起'}
+            {tile.type === 'venue' && '🔮 占いの館'}
+            {tile.type === 'casino' && (isBubbleEra ? '⚖️ 審判' : '🎰 CASINO')}
+          </span>
+          <span className="text-[8px] sm:text-[9px] font-bold opacity-80">
+            {tile.type === 'start' && '給与'}
+            {tile.type === 'hellowork' && 'ハローワーク'}
+            {tile.type === 'venue' && '波乱'}
+            {tile.type === 'casino' && (isBubbleEra ? '天国と地獄' : '配当')}
+          </span>
+        </div>
+      ) : (
+        // Event Header Strip
+        <div className="w-full flex items-center justify-between px-1.5 py-0.5 sm:py-1 bg-indigo-600 text-white shadow-2xs">
+          <span className="text-[9px] sm:text-[10px] font-black">
+            #{tile.landNumber}
+          </span>
+          <span className="text-[8px] sm:text-[9px] font-bold tracking-wide">
+            🎲 イベント
+          </span>
+        </div>
+      )}
+
+      {/* 2. MIDDLE ZONE: NAME & ICON / PLAYER PAWNS */}
+      <div className="relative flex-1 flex flex-col items-center justify-center px-1 py-0.5 text-center min-h-0">
+        {/* Visual Icons for Special Tiles */}
+        {tile.type === 'start' && (
+          <Flag className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 drop-shadow-sm mb-0.5" />
+        )}
+        {tile.type === 'hellowork' && (
+          <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-amber-200 drop-shadow-sm mb-0.5" />
+        )}
+        {tile.type === 'venue' && (
+          <span className="text-base sm:text-xl drop-shadow-sm mb-0.5">🔮</span>
+        )}
+        {tile.type === 'casino' && (
+          isBubbleEra ? (
+            <span className="text-base sm:text-xl drop-shadow-sm mb-0.5 animate-pulse">⚖️</span>
+          ) : (
+            <Dices className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-300 drop-shadow-sm mb-0.5" />
+          )
+        )}
+        {tile.type === 'event' && (
+          <span className="text-base sm:text-xl drop-shadow-sm mb-0.5">⚡</span>
+        )}
+
+        {/* Tile Name */}
+        <div
+          className={`text-[10px] sm:text-xs font-black leading-tight tracking-tight px-0.5 line-clamp-1 ${
+            isCorner
+              ? 'text-white drop-shadow-xs'
+              : tile.type === 'event'
+              ? 'text-indigo-950'
+              : 'text-slate-900'
+          }`}
+        >
+          {tile.type === 'casino' && isBubbleEra ? '天国と地獄' : tile.name}
+        </div>
+
+        {/* Active Multiplier Badges (Floating quietly under name) */}
+        {rentInfo && owner && (
+          <div className="flex items-center gap-0.5 mt-0.5 flex-wrap justify-center pointer-events-none">
+            {rentInfo.isMonopolyBonus ? (
+              <span
+                className="text-[7px] sm:text-[8px] font-black bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 px-1 py-0.2 rounded shadow-2xs border border-amber-300 font-mono tracking-tighter animate-pulse"
+                title="エリア独占ボーナス: 支払額2倍"
+              >
+                👑独占2x
+              </span>
+            ) : rentInfo.isAdjacentBonus ? (
+              <span
+                className="text-[7px] sm:text-[8px] font-black bg-rose-500 text-white px-1 py-0.2 rounded shadow-2xs tracking-tighter"
+                title="隣接保有ボーナス: 支払額1.5倍"
+              >
+                🤝隣接1.5x
+              </span>
+            ) : null}
+            {rentInfo.isBubbleEra && (
+              <span
+                className="text-[7px] sm:text-[8px] font-black bg-cyan-400 text-slate-950 px-1 py-0.2 rounded shadow-2xs font-mono tracking-tighter"
+                title="バブル期ボーナス: 通行料+100M"
+              >
+                +100M
+              </span>
+            )}
+            {activePriceFluctuation && (
+              <span
+                className={`text-[7px] sm:text-[8px] font-black px-1 py-0.2 rounded shadow-2xs ${
+                  activePriceFluctuation.multiplier === 2.0
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-emerald-600 text-white'
+                }`}
+                title={`市場変動: 家賃${activePriceFluctuation.multiplier}倍`}
+              >
+                変動{activePriceFluctuation.multiplier}x
+              </span>
+            )}
+            {owner.hasSurgeRent && (
+              <span
+                className="text-[7px] sm:text-[8px] font-black bg-orange-500 text-white px-1 py-0.2 rounded shadow-2xs"
+                title="支払額上昇カード適用中: 家賃2倍"
+              >
+                支払2倍
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Player Pawns Standing in Middle (Overlays cleanly without blocking bottom numbers) */}
+        {playersOnTile.length > 0 && (
+          <div className="absolute inset-0 flex items-center justify-center -space-x-1 sm:-space-x-1.5 z-30 pointer-events-none bg-white/75 sm:bg-white/80 backdrop-blur-[1px] rounded-lg p-0.5 transition-all">
+            {playersOnTile.map((p) => (
+              <div
+                key={p.id}
+                className={`relative flex items-center justify-center w-5 h-5 sm:w-7 sm:h-7 rounded-full text-xs sm:text-sm shadow-md border-2 border-white ring-1 sm:ring-2 ${
+                  p.color === 'red'
+                    ? 'bg-rose-500 ring-rose-400'
+                    : p.color === 'blue'
+                    ? 'bg-sky-500 ring-sky-400'
+                    : p.color === 'emerald'
+                    ? 'bg-emerald-500 ring-emerald-400'
+                    : p.color === 'amber'
+                    ? 'bg-amber-500 ring-amber-400'
+                    : 'bg-purple-500 ring-purple-400'
+                } animate-bounce-subtle`}
+                title={`${p.name} (所持金: ${p.money}M)`}
+              >
+                <span>{p.avatar}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 3. BOTTOM STATS / ACTION STRIP */}
+      <div className="w-full shrink-0">
+        {tile.type === 'land' ? (
+          owner ? (
+            // Owned Land: RENT is the primary prominent figure
+            <div className="bg-black/8 border-t border-black/10 px-1 py-0.5 sm:py-1 flex items-center justify-between text-[9px] sm:text-[10px]">
+              <span className="text-slate-600 font-bold shrink-0">通行料</span>
+              <span className="font-black text-rose-700 sm:text-xs font-mono tabular-nums tracking-tight">
+                {rentInfo ? rentInfo.rent : tile.baseRent}
+                <span className="text-[8px] sm:text-[9px] ml-0.5 font-bold">M</span>
+              </span>
+            </div>
+          ) : (
+            // Unowned Land: CONTRACT COST is the primary figure, plus Base Rent
+            <div className="bg-slate-100/90 border-t border-slate-200 px-1 py-0.5 sm:py-1 flex flex-col gap-0.5">
+              <div className="flex items-center justify-between text-[9px] sm:text-[10px] leading-tight">
+                <span className="text-slate-600 font-bold shrink-0">契約金</span>
+                <div className="flex items-center gap-1 font-mono tabular-nums">
+                  {isRealEstateSaleActive && (
+                    <span className="text-[8px] text-slate-400 line-through">
+                      {baseCost}M
+                    </span>
+                  )}
+                  <span
+                    className={`font-black ${
+                      isRealEstateSaleActive
+                        ? 'text-emerald-700 font-black'
+                        : 'text-slate-900'
+                    }`}
+                  >
+                    {effectiveCost}
+                    <span className="text-[8px] sm:text-[9px] font-bold ml-0.5">M</span>
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-[8px] sm:text-[9px] text-slate-500 leading-tight">
+                <span>家賃</span>
+                <span className="font-mono tabular-nums font-semibold">
+                  {tile.baseRent}M
+                </span>
+              </div>
+            </div>
+          )
+        ) : tile.type === 'start' ? (
+          <div className="bg-black/30 border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[9px] sm:text-[11px] font-black text-amber-200">
+            {isBubbleEra ? '給与 +300M (バブル)' : '給与 +200M'}
+          </div>
+        ) : tile.type === 'hellowork' ? (
+          <div className="bg-black/30 border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-amber-100">
+            {isBubbleEra ? '出目×100+100M' : '出目×100M 給与'}
+          </div>
+        ) : tile.type === 'venue' ? (
+          <div className="bg-black/30 border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-purple-100">
+            100Mで占い
+          </div>
+        ) : tile.type === 'casino' ? (
+          <div
+            className={`border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black ${
+              isBubbleEra
+                ? 'bg-amber-500/30 text-amber-200 animate-pulse'
+                : 'bg-black/30 text-yellow-200'
+            }`}
+          >
+            {isBubbleEra ? '⚖️ 審判のダイス' : 'ダイス勝負'}
+          </div>
+        ) : (
+          <div className="bg-indigo-100/90 border-t border-indigo-200 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-indigo-700">
             カードを引く
           </div>
         )}
       </div>
-
-      {/* Players Standing on this Tile (Pawns) */}
-      {playersOnTile.length > 0 && (
-        <div className="absolute inset-x-0 bottom-1 flex items-center justify-center gap-1 z-30 pointer-events-none">
-          {playersOnTile.map((p) => (
-            <div
-              key={p.id}
-              className={`relative flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-full text-sm sm:text-base shadow-md border-2 border-white ring-2 ${
-                p.color === 'red'
-                  ? 'bg-rose-500 ring-rose-400'
-                  : p.color === 'blue'
-                  ? 'bg-sky-500 ring-sky-400'
-                  : p.color === 'emerald'
-                  ? 'bg-emerald-500 ring-emerald-400'
-                  : p.color === 'amber'
-                  ? 'bg-amber-500 ring-amber-400'
-                  : 'bg-purple-500 ring-purple-400'
-              } animate-bounce-subtle`}
-              title={`${p.name} (所持金: ${p.money}マニー)`}
-            >
-              <span>{p.avatar}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 };

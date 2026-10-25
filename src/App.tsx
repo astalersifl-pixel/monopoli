@@ -10,8 +10,14 @@ import {
   GameStateSync,
   PlayerColor,
 } from './types/game';
-import { INITIAL_TILES, calculateLandRent } from './utils/boardData';
-import { drawRandomEventCard } from './utils/eventCards';
+import {
+  INITIAL_TILES,
+  calculateLandRent,
+  isAreaMonopoly,
+  isAdjacentLandOwned,
+  areAllLandsContracted,
+} from './utils/boardData';
+import { drawNormalEventCard, drawFortuneCard } from './utils/eventCards';
 import { AIHelper } from './utils/ai';
 import { sounds } from './utils/audio';
 import { onlineManager, NetworkMessage } from './utils/online';
@@ -20,19 +26,21 @@ import { Board } from './components/Board';
 import { GameHeader } from './components/GameHeader';
 import { EventCardModal } from './components/EventCardModal';
 import { CasinoModal } from './components/CasinoModal';
+import { HeavenAndHellModal } from './components/HeavenAndHellModal';
 import { BankruptcyModal } from './components/BankruptcyModal';
 import { TileDetailModal } from './components/TileDetailModal';
 import { StartGameModal } from './components/StartGameModal';
 import { OnlineLobbyModal } from './components/OnlineLobbyModal';
 import { RulesModal } from './components/RulesModal';
 import { VictoryModal } from './components/VictoryModal';
+import { GameLogModal } from './components/GameLogModal';
 
 const ONLINE_COLORS: PlayerColor[] = ['red', 'blue', 'emerald', 'amber', 'purple'];
 
 export default function App() {
   // Game Configuration & State
   const [settings, setSettings] = useState<GameSettings>({
-    targetMoney: 5000,
+    targetMoney: 2000,
     startBonus: 200,
     soundEnabled: true,
     gameSpeed: 'normal',
@@ -44,14 +52,18 @@ export default function App() {
   const [gamePhase, setGamePhase] = useState<GamePhase>('setup');
   const [currentDice, setCurrentDice] = useState<number>(1);
   const [isRolling, setIsRolling] = useState<boolean>(false);
+  const [isBubbleEra, setIsBubbleEra] = useState<boolean>(false);
 
   // Fluctuations & Modals
   const [activePriceFluctuation, setActivePriceFluctuation] =
     useState<ActivePriceFluctuation | null>(null);
+  const [realEstateSalePurchasesRemaining, setRealEstateSalePurchasesRemaining] =
+    useState<number>(0);
   const [currentEventCard, setCurrentEventCard] = useState<EventCard | null>(null);
   const [selectedTileForDetail, setSelectedTileForDetail] = useState<Tile | null>(null);
   const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
   const [showCasinoModal, setShowCasinoModal] = useState<boolean>(false);
+  const [showLogModal, setShowLogModal] = useState<boolean>(false);
 
   // Bankruptcy State
   const [bankruptcyDebt, setBankruptcyDebt] = useState<{
@@ -86,11 +98,13 @@ export default function App() {
     gamePhase,
     currentDice,
     activePriceFluctuation,
+    realEstateSalePurchasesRemaining: 0,
     currentEventCard,
     logs,
     winner,
     settings,
     bankruptcyDebt,
+    isBubbleEra,
   });
 
   useEffect(() => {
@@ -101,11 +115,13 @@ export default function App() {
       gamePhase,
       currentDice,
       activePriceFluctuation,
+      realEstateSalePurchasesRemaining,
       currentEventCard,
       logs,
       winner,
       settings,
       bankruptcyDebt,
+      isBubbleEra,
     };
   });
 
@@ -177,6 +193,9 @@ export default function App() {
             inHelloWork: false,
             hasRentExemption: false,
             hasSuperLucky: false,
+            hasInfoManipulation: false,
+            hasSurgeRent: false,
+            skipNextTurn: false,
             totalLaps: 0,
             peerId: fromPeerId,
           };
@@ -248,18 +267,20 @@ export default function App() {
     setGamePhase(data.gamePhase);
     setCurrentDice(data.currentDice);
     setActivePriceFluctuation(data.activePriceFluctuation);
+    setRealEstateSalePurchasesRemaining(data.realEstateSalePurchasesRemaining || 0);
     setCurrentEventCard(data.currentEventCard);
     setLogs(data.logs);
     setWinner(data.winner);
     setSettings(data.settings);
     setBankruptcyDebt(data.bankruptcyDebt);
+    setIsBubbleEra(data.isBubbleEra || false);
   };
 
   // Host handles guest actions
   const handleGuestAction = (payload: any) => {
     const action = payload.action;
     if (action === 'roll_dice') {
-      handleRollDice();
+      handleRollDice(payload.chosenRoll);
     } else if (action === 'buy_land') {
       handleBuyLand();
     } else if (action === 'skip_buy_land') {
@@ -270,12 +291,14 @@ export default function App() {
       handleSkipRankUp();
     } else if (action === 'super_lucky_roll') {
       handleRollForSuperLucky();
-    } else if (action === 'venue_pass_choice') {
-      handleVenuePassChoice(payload.draw);
+    } else if (action === 'fortune_hall_choice') {
+      handleFortuneHallChoice(payload.draw);
     } else if (action === 'event_card_confirm') {
       handleEventCardConfirm(payload.resultPayload);
     } else if (action === 'casino_finish') {
       handleCasinoFinish(payload.netProfit);
+    } else if (action === 'heaven_and_hell_finish') {
+      handleHeavenAndHellFinish(payload.result);
     } else if (action === 'sell_tile') {
       handleSellTile(payload.tileId);
     } else if (action === 'pay_debt_resume') {
@@ -321,10 +344,12 @@ export default function App() {
     );
     setCurrentPlayerIndex(0);
     setActivePriceFluctuation(null);
+    setRealEstateSalePurchasesRemaining(0);
     setCurrentEventCard(null);
     setWinner(null);
     setBankruptcyDebt(null);
     setShowCasinoModal(false);
+    setIsBubbleEra(false);
     setLogs([
       {
         id: 'start',
@@ -359,6 +384,9 @@ export default function App() {
       inHelloWork: false,
       hasRentExemption: false,
       hasSuperLucky: false,
+      hasInfoManipulation: false,
+      hasSurgeRent: false,
+      skipNextTurn: false,
       totalLaps: 0,
     };
 
@@ -411,10 +439,12 @@ export default function App() {
     setTiles(INITIAL_TILES.map((t) => ({ ...t, ownerId: null, rank: 0 })));
     setCurrentPlayerIndex(0);
     setActivePriceFluctuation(null);
+    setRealEstateSalePurchasesRemaining(0);
     setCurrentEventCard(null);
     setWinner(null);
     setBankruptcyDebt(null);
     setShowCasinoModal(false);
+    setIsBubbleEra(false);
     const initialLogs: GameLog[] = [
       {
         id: 'start_online',
@@ -433,11 +463,13 @@ export default function App() {
       gamePhase: 'waiting_roll',
       currentDice: 1,
       activePriceFluctuation: null,
+      realEstateSalePurchasesRemaining: 0,
       currentEventCard: null,
       logs: initialLogs,
       winner: null,
       settings,
       bankruptcyDebt: null,
+      isBubbleEra: false,
     };
 
     onlineManager.broadcast({
@@ -473,8 +505,54 @@ export default function App() {
     if (gamePhase === 'game_over') return;
 
     const nextIndex = (currentPlayerIndex + 1) % players.length;
-    setCurrentPlayerIndex(nextIndex);
     const nextPlayer = players[nextIndex];
+
+    // Check if player has skipNextTurn (次から頑張る)
+    if (nextPlayer.skipNextTurn) {
+      const updatedPlayers = players.map((p, idx) =>
+        idx === nextIndex ? { ...p, skipNextTurn: false } : p
+      );
+      setPlayers(updatedPlayers);
+      sounds.playBuzzer();
+      addLog(
+        `💤 【次から頑張る】の効果で ${nextPlayer.name} はこのターンお休みです。`,
+        nextPlayer.id
+      );
+
+      const subsequentIndex = (nextIndex + 1) % updatedPlayers.length;
+      setCurrentPlayerIndex(subsequentIndex);
+      const subsequentPlayer = updatedPlayers[subsequentIndex];
+
+      let newFluctuation = activePriceFluctuation;
+      if (
+        activePriceFluctuation &&
+        activePriceFluctuation.expiresOnPlayerTurn === subsequentPlayer.id
+      ) {
+        newFluctuation = null;
+        setActivePriceFluctuation(null);
+        addLog('価格変動の効果が終了し、通常の支払額に戻りました。');
+      }
+
+      let nextPhase: GamePhase = 'waiting_roll';
+      if (subsequentPlayer.inHelloWork) {
+        nextPhase = 'hellowork_turn';
+        addLog(
+          `💼 ${subsequentPlayer.name} はハローワークでのターンです。サイコロを振って給料を獲得します。`,
+          subsequentPlayer.id
+        );
+      }
+      setGamePhase(nextPhase);
+
+      broadcastStateIfHost({
+        players: updatedPlayers,
+        currentPlayerIndex: subsequentIndex,
+        gamePhase: nextPhase,
+        activePriceFluctuation: newFluctuation,
+      });
+      return;
+    }
+
+    setCurrentPlayerIndex(nextIndex);
 
     let newFluctuation = activePriceFluctuation;
     if (
@@ -513,9 +591,12 @@ export default function App() {
         const roll = Math.floor(Math.random() * 6) + 1;
         setCurrentDice(roll);
         setIsRolling(false);
+        sounds.playDiceLand();
 
-        const salary = roll * 100;
-        sounds.playCoin();
+        const salary = roll * 100 + (isBubbleEra ? 100 : 0);
+        setTimeout(() => {
+          sounds.playCoin();
+        }, 300);
 
         const updatedPlayers = players.map((p, idx) => {
           if (idx === currentPlayerIndex) {
@@ -530,7 +611,9 @@ export default function App() {
 
         setPlayers(updatedPlayers);
         addLog(
-          `💼 ${currentPlayer.name} はハローワークでサイコロ【${roll}】を出して ${salary}マニーを獲得！次のターンから行動できます。`,
+          `💼 ${currentPlayer.name} はハローワークでサイコロ【${roll}】を出して ${salary}マニー${
+            isBubbleEra ? '（バブル期+100M）' : ''
+          }を獲得！次のターンから行動できます。`,
           currentPlayer.id,
           'money'
         );
@@ -541,26 +624,73 @@ export default function App() {
 
         setTimeout(() => {
           handleNextTurn();
-        }, getDelay(1000));
+        }, getDelay(1200));
       }, getDelay(800));
     });
   };
 
   // Standard Dice Roll
-  const handleRollDice = () => {
-    executeOrSendAction('roll_dice', {}, () => {
+  const handleRollDice = (chosenRoll?: number) => {
+    executeOrSendAction('roll_dice', { chosenRoll }, () => {
       if (isRolling || gamePhase !== 'waiting_roll') return;
       setIsRolling(true);
 
+      const hadInfoManipulation = !!currentPlayer.hasInfoManipulation;
+      const targetRoll =
+        chosenRoll && chosenRoll >= 1 && chosenRoll <= 6
+          ? chosenRoll
+          : currentPlayer.isAi && hadInfoManipulation
+          ? AIHelper.chooseBestDice(currentPlayer, tiles)
+          : Math.floor(Math.random() * 6) + 1;
+
+      // Clear hasInfoManipulation immediately when roll is initiated
+      if (hadInfoManipulation) {
+        setPlayers((prev) =>
+          prev.map((p, idx) =>
+            idx === currentPlayerIndex ? { ...p, hasInfoManipulation: false } : p
+          )
+        );
+      }
+
       setTimeout(() => {
-        const roll = Math.floor(Math.random() * 6) + 1;
+        const roll = targetRoll;
         setCurrentDice(roll);
         setIsRolling(false);
-        setGamePhase('moving');
+        sounds.playDiceLand();
 
-        addLog(`🎲 ${currentPlayer.name} はサイコロで【${roll}】を出しました。`, currentPlayer.id, 'roll');
-        broadcastStateIfHost({ currentDice: roll, gamePhase: 'moving' });
-        movePlayerStepByStep(roll);
+        // Use latest state to avoid stale closures
+        const latestPlayers = latestStateRef.current.players;
+        const updatedPlayers = latestPlayers.map((p, idx) =>
+          idx === currentPlayerIndex ? { ...p, hasInfoManipulation: false } : p
+        );
+        setPlayers(updatedPlayers);
+
+        if (hadInfoManipulation) {
+          if (chosenRoll && chosenRoll >= 1 && chosenRoll <= 6) {
+            addLog(
+              `🎯 【情報操作】 ${currentPlayer.name} は出目を狙い通り【${roll}】に指定しました！（効果消費）`,
+              currentPlayer.id,
+              'roll'
+            );
+          } else {
+            addLog(
+              `🎯 【情報操作】 ${currentPlayer.name} はランダムにサイコロを振り【${roll}】を出しました！（効果消費）`,
+              currentPlayer.id,
+              'roll'
+            );
+          }
+          broadcastStateIfHost({ currentDice: roll, players: updatedPlayers });
+        } else {
+          addLog(`🎲 ${currentPlayer.name} はサイコロで【${roll}】を出しました！`, currentPlayer.id, 'roll');
+          broadcastStateIfHost({ currentDice: roll });
+        }
+
+        // Brief dramatic reveal pause so the roll result registers clearly
+        setTimeout(() => {
+          setGamePhase('moving');
+          broadcastStateIfHost({ currentDice: roll, gamePhase: 'moving' });
+          movePlayerStepByStep(roll);
+        }, getDelay(500));
       }, getDelay(800));
     });
   };
@@ -571,7 +701,6 @@ export default function App() {
     const startPos = currentPlayer.position;
     let currentPos = startPos;
     let passedStart = false;
-    let passedVenue = false;
 
     const interval = setInterval(() => {
       currentStep++;
@@ -580,11 +709,12 @@ export default function App() {
       sounds.playStep();
 
       if (currentPos === 0) passedStart = true;
-      if (currentPos === 12 && currentStep < totalSteps) passedVenue = true;
 
       setPlayers((prev) => {
         const updated = prev.map((p, idx) =>
-          idx === currentPlayerIndex ? { ...p, position: currentPos } : p
+          idx === currentPlayerIndex
+            ? { ...p, position: currentPos, hasInfoManipulation: false }
+            : p
         );
         broadcastStateIfHost({ players: updated });
         return updated;
@@ -592,7 +722,7 @@ export default function App() {
 
       if (currentStep >= totalSteps) {
         clearInterval(interval);
-        handleMovementFinished(startPos, currentPos, passedStart, passedVenue);
+        handleMovementFinished(startPos, currentPos, passedStart);
       }
     }, getDelay(180));
   };
@@ -601,28 +731,34 @@ export default function App() {
   const handleMovementFinished = (
     startPos: number,
     finalPos: number,
-    passedStart: boolean,
-    passedVenue: boolean
+    passedStart: boolean
   ) => {
-    let currentMoney = currentPlayer.money;
+    // Read from latestStateRef to avoid stale closure over players
+    const currentPlayers = latestStateRef.current.players;
+    const playerToUpdate = currentPlayers[currentPlayerIndex];
+    let currentMoney = playerToUpdate.money;
 
     if (passedStart) {
-      currentMoney += settings.startBonus;
+      const bonus = settings.startBonus + (isBubbleEra ? 100 : 0);
+      currentMoney += bonus;
       sounds.playCoin();
       addLog(
-        `🏁 ${currentPlayer.name} はスタート地点を通過し、給料 +${settings.startBonus}マニーを獲得！`,
-        currentPlayer.id,
+        `🏁 ${playerToUpdate.name} はスタート地点を通過し、給料 +${bonus}マニー${
+          isBubbleEra ? '（バブル期+100M）' : ''
+        }を獲得！`,
+        playerToUpdate.id,
         'money'
       );
     }
 
-    const updatedPlayers = players.map((p, idx) =>
+    const updatedPlayers = currentPlayers.map((p, idx) =>
       idx === currentPlayerIndex
         ? {
             ...p,
             money: currentMoney,
             position: finalPos,
             totalLaps: p.totalLaps + (passedStart ? 1 : 0),
+            hasInfoManipulation: false, // 一度きりの効果：サイコロ移動完了時に確実に解除
           }
         : p
     );
@@ -631,36 +767,32 @@ export default function App() {
 
     if (checkVictory(updatedPlayers)) return;
 
-    if (passedVenue && finalPos !== 12) {
-      setGamePhase('venue_pass_prompt');
-      broadcastStateIfHost({ gamePhase: 'venue_pass_prompt' });
-      return;
-    }
-
     resolveLandingSquare(finalPos, updatedPlayers);
   };
 
-  // Choice when passing Event Venue
-  const handleVenuePassChoice = (draw: boolean) => {
-    executeOrSendAction('venue_pass_choice', { draw }, () => {
+  // Choice when stopping at 占いの館 (Tile 12)
+  const handleFortuneHallChoice = (draw: boolean) => {
+    executeOrSendAction('fortune_hall_choice', { draw }, () => {
       if (draw) {
-        if (currentPlayer.money < 50) {
-          addLog(`マニーが不足しているため、カードを引けませんでした。`, currentPlayer.id);
-          resolveLandingSquare(currentPlayer.position, players);
+        if (currentPlayer.money < 100) {
+          addLog(`所持金が不足しているため、カードを引けませんでした。`, currentPlayer.id);
+          setGamePhase('turn_end');
+          broadcastStateIfHost({ gamePhase: 'turn_end' });
           return;
         }
 
         const updated = players.map((p, idx) =>
-          idx === currentPlayerIndex ? { ...p, money: p.money - 50 } : p
+          idx === currentPlayerIndex ? { ...p, money: p.money - 100 } : p
         );
         setPlayers(updated);
         sounds.playCard();
         addLog(
-          `🎪 ${currentPlayer.name} はイベント会場の通過時に50マニーを支払い、カードを引きます！`,
-          currentPlayer.id
+          `🔮 ${currentPlayer.name} は占いの館で100マニーを支払い、波乱のカードを引きました！`,
+          currentPlayer.id,
+          'money'
         );
 
-        const card = drawRandomEventCard();
+        const card = drawFortuneCard();
         setCurrentEventCard(card);
         setGamePhase('event_card_modal');
         broadcastStateIfHost({
@@ -669,8 +801,9 @@ export default function App() {
           gamePhase: 'event_card_modal',
         });
       } else {
-        addLog(`🎪 ${currentPlayer.name} はイベント会場の通過カードを見送りました。`, currentPlayer.id);
-        resolveLandingSquare(currentPlayer.position, players);
+        addLog(`🔮 ${currentPlayer.name} は占いの館でのカード取得を見送りました。`, currentPlayer.id);
+        setGamePhase('turn_end');
+        broadcastStateIfHost({ gamePhase: 'turn_end' });
       }
     });
   };
@@ -688,14 +821,16 @@ export default function App() {
     }
 
     if (tile.type === 'hellowork') {
-      const partTimeBonus = 100;
+      const partTimeBonus = 100 + (isBubbleEra ? 100 : 0);
       sounds.playCoin();
       const updated = currentPlayersState.map((p, idx) =>
         idx === currentPlayerIndex ? { ...p, money: p.money + partTimeBonus } : p
       );
       setPlayers(updated);
       addLog(
-        `💼 ${player.name} はハローワークを訪問！日当アルバイトで +${partTimeBonus}マニーを獲得！`,
+        `💼 ${player.name} はハローワークを訪問！日当アルバイトで +${partTimeBonus}マニー${
+          isBubbleEra ? '（バブル期+100M）' : ''
+        }を獲得！`,
         player.id,
         'money'
       );
@@ -707,16 +842,37 @@ export default function App() {
 
     if (tile.type === 'casino') {
       sounds.playCard();
-      addLog(`🎰 ${player.name} はカジノに到着しました！一攫千金に挑戦！`, player.id);
-      setShowCasinoModal(true);
-      setGamePhase('casino_modal');
-      broadcastStateIfHost({ gamePhase: 'casino_modal' });
+      if (isBubbleEra) {
+        addLog(
+          `⚖️ ${player.name} はバブル期の審判マス【天国と地獄】に到着！運命のサイコロを振ります！`,
+          player.id
+        );
+        setGamePhase('heaven_and_hell_modal');
+        broadcastStateIfHost({ gamePhase: 'heaven_and_hell_modal' });
+      } else {
+        addLog(`🎰 ${player.name} はカジノに到着しました！一攫千金に挑戦！`, player.id);
+        setShowCasinoModal(true);
+        setGamePhase('casino_modal');
+        broadcastStateIfHost({ gamePhase: 'casino_modal' });
+      }
       return;
     }
 
-    if (tile.type === 'venue' || tile.type === 'event') {
+    if (tile.type === 'venue') {
       sounds.playCard();
-      const card = drawRandomEventCard();
+      addLog(
+        `🔮 ${player.name} は【占いの館】に到着しました！100マニーで占いのカードを引くか選択できます。`,
+        player.id,
+        'event'
+      );
+      setGamePhase('fortune_hall_prompt');
+      broadcastStateIfHost({ gamePhase: 'fortune_hall_prompt' });
+      return;
+    }
+
+    if (tile.type === 'event') {
+      sounds.playCard();
+      const card = drawNormalEventCard();
       setCurrentEventCard(card);
       addLog(
         `🎲 ${player.name} は【${tile.name}】に止まり、イベントカードを引きます！`,
@@ -775,7 +931,7 @@ export default function App() {
         );
         setPlayers(updated);
         addLog(
-          `🛡️ ${player.name} は【支払い免除】カードを発動！ No.${tile.landNumber}「${tile.name}」の支払いが全額免除（0マニー）されました！`,
+          `🛡️ ${player.name} は【支払い免除】カードを発動！ No.${tile.landNumber}「${tile.name}」の支払いが全額免除（0マニー）され、カードを消費しました！`,
           player.id
         );
         setGamePhase('turn_end');
@@ -786,13 +942,22 @@ export default function App() {
       const rentCalculation = calculateLandRent(
         tile,
         tiles,
-        activePriceFluctuation ? activePriceFluctuation.multiplier : 1.0
+        activePriceFluctuation ? activePriceFluctuation.multiplier : 1.0,
+        isBubbleEra
       );
-      const totalRent = rentCalculation.rent;
+      let totalRent = rentCalculation.rent;
+      let isSurge = false;
+      if (owner.hasSurgeRent) {
+        totalRent = totalRent * 2;
+        isSurge = true;
+      }
 
       let detailMsg = `家賃: ${totalRent}マニー`;
+      if (isSurge) detailMsg += ' (💥【支払額上昇】×2倍)';
       if (rentCalculation.isRankedUp) detailMsg += ' (★Lv.2 ランク補正)';
-      if (rentCalculation.isAdjacentBonus) detailMsg += ' (隣接土地1.5倍)';
+      if (rentCalculation.isMonopolyBonus) detailMsg += ' (👑【エリア独占】×2倍)';
+      else if (rentCalculation.isAdjacentBonus) detailMsg += ' (🤝【隣接ボーナス】×1.5倍)';
+      if (rentCalculation.isBubbleEra) detailMsg += ' (💎【バブル期】+100M)';
       if (activePriceFluctuation) detailMsg += ` (市場価格変動 ×${activePriceFluctuation.multiplier})`;
 
       addLog(
@@ -800,11 +965,18 @@ export default function App() {
         player.id
       );
 
+      if (isSurge) {
+        addLog(
+          `💥 【支払額上昇】が発動！ ${owner.name} の土地への支払額が2倍になり、効果が消費されました！`,
+          owner.id
+        );
+      }
+
       if (player.money >= totalRent) {
         sounds.playCoin();
         const updated = currentPlayersState.map((p) => {
           if (p.id === player.id) return { ...p, money: p.money - totalRent };
-          if (p.id === owner.id) return { ...p, money: p.money + totalRent };
+          if (p.id === owner.id) return { ...p, money: p.money + totalRent, hasSurgeRent: false };
           return p;
         });
         setPlayers(updated);
@@ -820,6 +992,11 @@ export default function App() {
         broadcastStateIfHost({ players: updated, gamePhase: 'turn_end' });
       } else {
         sounds.playBuzzer();
+        const updated = currentPlayersState.map((p) => {
+          if (p.id === owner.id) return { ...p, hasSurgeRent: false };
+          return p;
+        });
+        setPlayers(updated);
         addLog(
           `⚠️ ${player.name} は ${totalRent}マニーを支払う所持金がありません！破産処理に入ります。`,
           player.id,
@@ -832,6 +1009,7 @@ export default function App() {
         setBankruptcyDebt(debtData);
         setGamePhase('bankruptcy_modal');
         broadcastStateIfHost({
+          players: updated,
           bankruptcyDebt: debtData,
           gamePhase: 'bankruptcy_modal',
         });
@@ -840,12 +1018,17 @@ export default function App() {
   };
 
   // Land Contract Action (Buy)
+  // Land Contract Action (Buy)
   const handleBuyLand = () => {
     executeOrSendAction('buy_land', {}, () => {
       const tile = tiles[currentPlayer.position];
       if (!tile || tile.type !== 'land' || !tile.cost) return;
 
-      if (currentPlayer.money < tile.cost) {
+      const isSaleActive = realEstateSalePurchasesRemaining > 0;
+      const baseCost = tile.cost;
+      const contractPrice = isSaleActive ? Math.floor(baseCost / 2) : baseCost;
+
+      if (currentPlayer.money < contractPrice) {
         addLog(`所持金が不足しているため契約できませんでした。`, currentPlayer.id);
         setGamePhase('turn_end');
         broadcastStateIfHost({ gamePhase: 'turn_end' });
@@ -854,8 +1037,14 @@ export default function App() {
 
       sounds.playBuy();
 
+      let newSaleRemaining = realEstateSalePurchasesRemaining;
+      if (isSaleActive) {
+        newSaleRemaining = Math.max(0, realEstateSalePurchasesRemaining - 1);
+        setRealEstateSalePurchasesRemaining(newSaleRemaining);
+      }
+
       const updatedPlayers = players.map((p, idx) =>
-        idx === currentPlayerIndex ? { ...p, money: p.money - tile.cost! } : p
+        idx === currentPlayerIndex ? { ...p, money: p.money - contractPrice } : p
       );
       const updatedTiles = tiles.map((t) =>
         t.id === tile.id ? { ...t, ownerId: currentPlayer.id } : t
@@ -864,17 +1053,59 @@ export default function App() {
       setPlayers(updatedPlayers);
       setTiles(updatedTiles);
 
-      addLog(
-        `🎉 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を ${tile.cost}マニーで契約しました！`,
-        currentPlayer.id,
-        'land'
-      );
+      if (isSaleActive) {
+        addLog(
+          `🎉 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を不動産セール半額（${contractPrice}マニー）で契約しました！${
+            newSaleRemaining === 0
+              ? '（※セール終了）'
+              : `（※セール残り${newSaleRemaining}回）`
+          }`,
+          currentPlayer.id,
+          'land'
+        );
+      } else {
+        addLog(
+          `🎉 ${currentPlayer.name} は No.${tile.landNumber}「${tile.name}」を ${contractPrice}マニーで契約しました！`,
+          currentPlayer.id,
+          'land'
+        );
+      }
+
+      if (isAreaMonopoly(tile.id, updatedTiles)) {
+        sounds.playWin();
+        addLog(
+          `👑 【エリア独占達成！】 ${currentPlayer.name} は対象エリア（全4マス）を独占しました！支払額が2倍になります！`,
+          currentPlayer.id,
+          'land'
+        );
+      } else if (isAdjacentLandOwned(tile.id, updatedTiles)) {
+        sounds.playBuy();
+        addLog(
+          `🤝 【隣接ボーナス発生！】 ${currentPlayer.name} は隣接ペアを保有しました！支払額が1.5倍になります！`,
+          currentPlayer.id,
+          'land'
+        );
+      }
+
+      let nextIsBubble = isBubbleEra;
+      if (!isBubbleEra && areAllLandsContracted(updatedTiles)) {
+        nextIsBubble = true;
+        setIsBubbleEra(true);
+        sounds.playWin();
+        addLog(
+          `🎆 【バブル期突入！】 すべての土地が契約されました！支払額・給与・イベント収入が+100マニー！カジノは【天国と地獄】マスへと変化しました！`,
+          undefined,
+          'rankup'
+        );
+      }
 
       setGamePhase('turn_end');
       broadcastStateIfHost({
         players: updatedPlayers,
         tiles: updatedTiles,
+        realEstateSalePurchasesRemaining: newSaleRemaining,
         gamePhase: 'turn_end',
+        isBubbleEra: nextIsBubble,
       });
     });
   };
@@ -885,6 +1116,9 @@ export default function App() {
       const tile = tiles[currentPlayer.position];
       if (!tile || !tile.cost) return;
 
+      const isSaleActive = realEstateSalePurchasesRemaining > 0;
+      const baseCost = isSaleActive ? Math.floor(tile.cost / 2) : tile.cost;
+
       setIsRolling(true);
 
       setTimeout(() => {
@@ -894,7 +1128,7 @@ export default function App() {
 
         let finalCost = 0;
         if (roll === 1) {
-          finalCost = tile.cost! * 2;
+          finalCost = baseCost * 2;
           sounds.playBuzzer();
           addLog(
             `🎲 【私は豪運！】サイコロ出目は【1】！痛恨の倍額（${finalCost}マニー）で契約！`,
@@ -910,7 +1144,7 @@ export default function App() {
         }
 
         if (currentPlayer.money < finalCost) {
-          addLog(`倍額の契約金が払えないため、契約できませんでした…`, currentPlayer.id);
+          addLog(`倍額の契約金が払えないため、契約できませんでした…【私は豪運！】カードは消費されました。`, currentPlayer.id);
           const updatedPlayers = players.map((p, idx) =>
             idx === currentPlayerIndex ? { ...p, hasSuperLucky: false } : p
           );
@@ -918,6 +1152,14 @@ export default function App() {
           setGamePhase('turn_end');
           broadcastStateIfHost({ players: updatedPlayers, gamePhase: 'turn_end' });
           return;
+        }
+
+        addLog(`✨ 【私は豪運！】カードが消費されました。`, currentPlayer.id);
+
+        let newSaleRemaining = realEstateSalePurchasesRemaining;
+        if (isSaleActive) {
+          newSaleRemaining = Math.max(0, realEstateSalePurchasesRemaining - 1);
+          setRealEstateSalePurchasesRemaining(newSaleRemaining);
         }
 
         const updatedPlayers = players.map((p, idx) =>
@@ -935,13 +1177,44 @@ export default function App() {
 
         setPlayers(updatedPlayers);
         setTiles(updatedTiles);
+
+        if (isAreaMonopoly(tile.id, updatedTiles)) {
+          sounds.playWin();
+          addLog(
+            `👑 【エリア独占達成！】 ${currentPlayer.name} は対象エリア（全4マス）を独占しました！支払額が2倍になります！`,
+            currentPlayer.id,
+            'land'
+          );
+        } else if (isAdjacentLandOwned(tile.id, updatedTiles)) {
+          sounds.playBuy();
+          addLog(
+            `🤝 【隣接ボーナス発生！】 ${currentPlayer.name} は隣接ペアを保有しました！支払額が1.5倍になります！`,
+            currentPlayer.id,
+            'land'
+          );
+        }
+
+        let nextIsBubble = isBubbleEra;
+        if (!isBubbleEra && areAllLandsContracted(updatedTiles)) {
+          nextIsBubble = true;
+          setIsBubbleEra(true);
+          sounds.playWin();
+          addLog(
+            `🎆 【バブル期突入！】 すべての土地が契約されました！支払額・給与・イベント収入が+100マニー！カジノは【天国と地獄】マスへと変化しました！`,
+            undefined,
+            'rankup'
+          );
+        }
+
         setGamePhase('turn_end');
 
         broadcastStateIfHost({
           players: updatedPlayers,
           tiles: updatedTiles,
+          realEstateSalePurchasesRemaining: newSaleRemaining,
           currentDice: roll,
           gamePhase: 'turn_end',
+          isBubbleEra: nextIsBubble,
         });
       }, getDelay(800));
     });
@@ -1011,6 +1284,8 @@ export default function App() {
     lotteryMoney?: number;
     majorDamageChoice?: 'pay' | 'relinquish';
     majorDamageTileId?: number;
+    majorDamageTargetPlayerId?: string;
+    transferRightsTileId?: number;
   }) => {
     executeOrSendAction('event_card_confirm', { resultPayload: payload }, () => {
       if (!currentEventCard) return;
@@ -1024,8 +1299,13 @@ export default function App() {
       switch (card.type) {
         case 'windfall': {
           sounds.playCoin();
-          player.money += 200;
-          addLog(`💰 ${player.name} は臨時収入で +200マニーを獲得！`, player.id, 'money');
+          const gain = 200 + (isBubbleEra ? 100 : 0);
+          player.money += gain;
+          addLog(
+            `💰 ${player.name} は臨時収入で +${gain}マニー${isBubbleEra ? '（バブル期+100M）' : ''}を獲得！`,
+            player.id,
+            'money'
+          );
           break;
         }
         case 'sudden_expense': {
@@ -1074,15 +1354,17 @@ export default function App() {
           break;
         }
         case 'major_damage': {
-          if (payload && payload.majorDamageTileId !== undefined) {
+          if (payload && payload.majorDamageTargetPlayerId && payload.majorDamageTileId !== undefined) {
+            const targetPlayer = updatedPlayers.find((p) => p.id === payload.majorDamageTargetPlayerId);
             const targetTile = tiles.find((t) => t.id === payload.majorDamageTileId);
-            if (targetTile) {
-              if (payload.majorDamageChoice === 'pay') {
-                player.money -= 200;
+            if (targetPlayer && targetTile) {
+              if (payload.majorDamageChoice === 'pay' && targetPlayer.money >= 200) {
+                targetPlayer.money -= 200;
                 sounds.playCoin();
                 addLog(
-                  `⚠️ ${player.name} は修繕費200マニーを支払い、No.${targetTile.landNumber}「${targetTile.name}」を守りました！`,
-                  player.id
+                  `⚠️ 大損害！ ${targetPlayer.name} は修繕費200マニーを支払い、No.${targetTile.landNumber}「${targetTile.name}」を守りました！`,
+                  targetPlayer.id,
+                  'money'
                 );
               } else {
                 sounds.playBuzzer();
@@ -1092,8 +1374,9 @@ export default function App() {
                   )
                 );
                 addLog(
-                  `⚠️ ${player.name} は No.${targetTile.landNumber}「${targetTile.name}」を手放し、未契約に戻りました。`,
-                  player.id
+                  `⚠️ 大損害！ ${targetPlayer.name} は200マニーを支払えず、No.${targetTile.landNumber}「${targetTile.name}」を手放し未契約に戻りました！`,
+                  targetPlayer.id,
+                  'land'
                 );
               }
             }
@@ -1102,9 +1385,15 @@ export default function App() {
         }
         case 'lottery': {
           if (payload && payload.lotteryMoney !== undefined) {
-            player.money += payload.lotteryMoney;
+            const prize =
+              payload.lotteryMoney > 0
+                ? payload.lotteryMoney + (isBubbleEra ? 100 : 0)
+                : 0;
+            player.money += prize;
             addLog(
-              `🎫 宝くじ結果: ${player.name} は賞金 ${payload.lotteryMoney}マニーを獲得！`,
+              `🎫 宝くじ結果: ${player.name} は賞金 ${prize}マニー${
+                isBubbleEra && prize > 0 ? '（バブル期+100M）' : ''
+              }を獲得！`,
               player.id,
               'money'
             );
@@ -1112,29 +1401,134 @@ export default function App() {
           break;
         }
         case 'disaster': {
-          const ownedCount = tiles.filter((t) => t.ownerId === player.id).length;
-          const disasterCost = ownedCount * 100;
-          if (player.money < disasterCost) {
-            const debtData = {
-              debtAmount: disasterCost,
-              creditorPlayerId: null,
-            };
-            setBankruptcyDebt(debtData);
-            setGamePhase('bankruptcy_modal');
-            broadcastStateIfHost({
-              bankruptcyDebt: debtData,
-              gamePhase: 'bankruptcy_modal',
-            });
-            return;
-          } else {
-            sounds.playBuzzer();
-            player.money -= disasterCost;
-            addLog(
-              `⚡ 災害発生！ ${player.name} は所有地${ownedCount}件分の修繕費 ${disasterCost}マニーを支払いました。`,
-              player.id,
-              'money'
-            );
+          sounds.playBuzzer();
+          let anyDamaged = false;
+          for (const p of updatedPlayers) {
+            const ownedCount = tiles.filter((t) => t.ownerId === p.id).length;
+            if (ownedCount > 0) {
+              const disasterCost = ownedCount * 50;
+              p.money = Math.max(0, p.money - disasterCost);
+              addLog(
+                `⚡ 災害発生！ ${p.name} は所有地${ownedCount}件分の修繕費 ${disasterCost}マニーを支払いました。`,
+                p.id,
+                'money'
+              );
+              anyDamaged = true;
+            }
           }
+          if (!anyDamaged) {
+            addLog(`⚡ 災害発生！しかし誰も土地を所有していなかったため被害はありませんでした。`);
+          }
+          break;
+        }
+        case 'info_manipulation': {
+          player.hasInfoManipulation = true;
+          sounds.playWin();
+          addLog(
+            `🎯 【情報操作】 ${player.name} は次の手番でサイコロの出目を1〜6から自由に選べるようになりました！`,
+            player.id
+          );
+          break;
+        }
+        case 'surge_rent': {
+          player.hasSurgeRent = true;
+          sounds.playWin();
+          addLog(
+            `💥 【支払額上昇】 ${player.name} の土地への支払額が一度だけ2倍になります！`,
+            player.id
+          );
+          break;
+        }
+        case 'real_estate_sale': {
+          setRealEstateSalePurchasesRemaining(3);
+          sounds.playWin();
+          addLog(
+            `🏷️ 【不動産セール】開催！全土地の契約金がすべて半額（50% OFF）になります！（全プレイヤー合計3回の契約まで）`
+          );
+          broadcastStateIfHost({ realEstateSalePurchasesRemaining: 3 });
+          break;
+        }
+        case 'transfer_rights': {
+          if (payload && payload.transferRightsTileId) {
+            const targetTile = tiles.find((t) => t.id === payload.transferRightsTileId);
+            if (targetTile && targetTile.cost && player.money >= targetTile.cost) {
+              const previousOwner = updatedPlayers.find((p) => p.id === targetTile.ownerId);
+              player.money -= targetTile.cost;
+              sounds.playBuy();
+
+              const updatedTiles = tiles.map((t) =>
+                t.id === targetTile.id ? { ...t, ownerId: player.id, rank: 0 } : t
+              );
+              setTiles(updatedTiles);
+
+              addLog(
+                `📜 【権利の譲渡】 ${player.name} は契約金 ${targetTile.cost}マニーを支払い、${previousOwner?.name || '相手'} の No.${targetTile.landNumber}「${targetTile.name}」を購入・権利を獲得しました！（ランクは初期状態に戻ります）`,
+                player.id,
+                'land'
+              );
+
+              if (isAreaMonopoly(targetTile.id, updatedTiles)) {
+                sounds.playWin();
+                addLog(
+                  `👑 【エリア独占達成！】 ${player.name} は対象エリア（全4マス）を独占しました！支払額が2倍になります！`,
+                  player.id,
+                  'land'
+                );
+              } else if (isAdjacentLandOwned(targetTile.id, updatedTiles)) {
+                sounds.playBuy();
+                addLog(
+                  `🤝 【隣接ボーナス発生！】 ${player.name} は隣接ペアを保有しました！支払額が1.5倍になります！`,
+                  player.id,
+                  'land'
+                );
+              }
+
+              broadcastStateIfHost({ tiles: updatedTiles });
+            }
+          } else {
+            addLog(`📜 ${player.name} は土地の買収を見送りました。`, player.id);
+          }
+          break;
+        }
+        case 'feel_good_roll': {
+          sounds.playWin();
+          addLog(
+            `✨ 【なんだか気分がいい！】 ${player.name} は気分爽快！もう一度サイコロを振ることができます！`,
+            player.id
+          );
+          setPlayers(updatedPlayers);
+          setGamePhase('waiting_roll');
+          broadcastStateIfHost({
+            players: updatedPlayers,
+            gamePhase: 'waiting_roll',
+            currentEventCard: null,
+          });
+          return;
+        }
+        case 'slacking_off': {
+          const gain = 100 + (isBubbleEra ? 100 : 0);
+          player.money += gain;
+          player.skipNextTurn = true;
+          sounds.playCoin();
+          addLog(
+            `💤 【次から頑張る】 ${player.name} は${gain}マニー${
+              isBubbleEra ? '（バブル期+100M）' : ''
+            }を受け取りました！ただし、次の自分のターンは1回休みになります。`,
+            player.id,
+            'money'
+          );
+          break;
+        }
+        case 'drinking_party': {
+          sounds.playBuy();
+          updatedPlayers = updatedPlayers.map((p) => ({
+            ...p,
+            position: 12,
+            money: Math.max(0, p.money - 50),
+          }));
+          addLog(
+            '🍻 【飲み会をしよう！】 全員が占いの館（マス12）に集合！参加費として全員が50マニーを消費しました！'
+          );
           break;
         }
       }
@@ -1177,6 +1571,132 @@ export default function App() {
 
       setGamePhase('turn_end');
       broadcastStateIfHost({ players: updated, gamePhase: 'turn_end' });
+    });
+  };
+
+  // Heaven and Hell Tile Resolution
+  const handleHeavenAndHellFinish = (result: {
+    roll: number;
+    moneyDelta?: number;
+    uncontractedTileIds?: number[];
+    targetOpponentId?: string;
+  }) => {
+    executeOrSendAction('heaven_and_hell_finish', { result }, () => {
+      let updatedPlayers = [...players];
+      let updatedTiles = [...tiles];
+      const p = updatedPlayers[currentPlayerIndex];
+
+      // Handle uncontracted lands (effects 5 & 6)
+      if (result.uncontractedTileIds && result.uncontractedTileIds.length > 0) {
+        updatedTiles = updatedTiles.map((t) =>
+          result.uncontractedTileIds!.includes(t.id) ? { ...t, ownerId: null, rank: 0 } : t
+        );
+        setTiles(updatedTiles);
+      }
+
+      // Handle moneyDelta (effects 1, 2, 3, 4)
+      if (result.moneyDelta) {
+        if (result.moneyDelta > 0) {
+          p.money += result.moneyDelta;
+          sounds.playWin();
+          addLog(
+            `✨ ⚖️【天国と地獄】出目【${result.roll}】：${p.name} は200マニーを獲得しました！`,
+            p.id,
+            'money'
+          );
+        } else {
+          const cost = Math.abs(result.moneyDelta);
+          if (p.money < cost) {
+            sounds.playBuzzer();
+            addLog(
+              `💀 ⚖️【天国と地獄】出目【${result.roll}】：${p.name} は200マニーを支払えず破産処理に入ります！`,
+              p.id,
+              'bankrupt'
+            );
+            const debtData = {
+              debtAmount: cost,
+              creditorPlayerId: null,
+            };
+            setBankruptcyDebt(debtData);
+            setGamePhase('bankruptcy_modal');
+            setPlayers(updatedPlayers);
+            broadcastStateIfHost({
+              players: updatedPlayers,
+              tiles: updatedTiles,
+              bankruptcyDebt: debtData,
+              gamePhase: 'bankruptcy_modal',
+            });
+            return;
+          } else {
+            p.money -= cost;
+            sounds.playBuzzer();
+            addLog(
+              `💀 ⚖️【天国と地獄】出目【${result.roll}】：${p.name} は200マニーを没収されました…`,
+              p.id,
+              'money'
+            );
+          }
+        }
+      } else if (result.roll === 5) {
+        sounds.playBuzzer();
+        if (result.uncontractedTileIds && result.uncontractedTileIds.length > 0) {
+          const names = result.uncontractedTileIds
+            .map((id) => {
+              const t = tiles.find((tile) => tile.id === id);
+              return t ? `No.${t.landNumber}「${t.name}」` : '';
+            })
+            .filter(Boolean)
+            .join('、');
+          addLog(
+            `💥 ⚖️【天国と地獄】出目【5】：${p.name} の所有地 ${result.uncontractedTileIds.length}件（${names}）が未契約に戻りました！`,
+            p.id,
+            'land'
+          );
+        } else {
+          addLog(
+            `💥 ⚖️【天国と地獄】出目【5】：${p.name} の土地3件が未契約に…しかし土地を1つも持っていなかったため無傷でした！`,
+            p.id
+          );
+        }
+      } else if (result.roll === 6) {
+        sounds.playWin();
+        if (
+          result.targetOpponentId &&
+          result.uncontractedTileIds &&
+          result.uncontractedTileIds.length > 0
+        ) {
+          const targetOpp = players.find((pl) => pl.id === result.targetOpponentId);
+          const names = result.uncontractedTileIds
+            .map((id) => {
+              const t = tiles.find((tile) => tile.id === id);
+              return t ? `No.${t.landNumber}「${t.name}」` : '';
+            })
+            .filter(Boolean)
+            .join('、');
+          addLog(
+            `⚡ ⚖️【天国と地獄】出目【6】：ライバル失脚！${
+              targetOpp?.name || '相手'
+            } の所有地 ${result.uncontractedTileIds.length}件（${names}）が未契約に戻りました！`,
+            p.id,
+            'land'
+          );
+        } else {
+          addLog(
+            `⚡ ⚖️【天国と地獄】出目【6】：ライバルの土地を3件未契約化！…しかし誰も土地を所有していませんでした。`,
+            p.id
+          );
+        }
+      }
+
+      setPlayers(updatedPlayers);
+      if (checkVictory(updatedPlayers)) return;
+
+      setGamePhase('turn_end');
+      broadcastStateIfHost({
+        players: updatedPlayers,
+        tiles: updatedTiles,
+        gamePhase: 'turn_end',
+      });
     });
   };
 
@@ -1295,7 +1815,47 @@ export default function App() {
       if (gamePhase === 'hellowork_turn') {
         handleHelloWorkRoll();
       } else if (gamePhase === 'waiting_roll') {
-        handleRollDice();
+        if (currentPlayer.hasInfoManipulation) {
+          const bestRoll = AIHelper.chooseBestDice(currentPlayer, tiles);
+          handleRollDice(bestRoll);
+        } else {
+          handleRollDice();
+        }
+      } else if (gamePhase === 'event_card_modal') {
+        if (currentEventCard?.type === 'transfer_rights') {
+          const landToBuy = AIHelper.selectLandToBuyWithTransferRights(currentPlayer, tiles);
+          if (landToBuy) {
+            handleEventCardConfirm({ transferRightsTileId: landToBuy.id });
+          } else {
+            handleEventCardConfirm();
+          }
+        } else if (currentEventCard?.type === 'price_fluctuation') {
+          const roll = Math.floor(Math.random() * 6) + 1;
+          const mult = roll % 2 !== 0 ? 2.0 : 0.5;
+          handleEventCardConfirm({ diceRoll: roll, fluctuationMultiplier: mult });
+        } else if (currentEventCard?.type === 'major_damage') {
+          const opponentsWithLands = players.filter(
+            (p) => p.id !== currentPlayer.id && tiles.some((t) => t.ownerId === p.id)
+          );
+          if (opponentsWithLands.length > 0) {
+            const opp = opponentsWithLands[0];
+            const oppLand = tiles.find((t) => t.ownerId === opp.id);
+            if (oppLand) {
+              const choice = opp.money >= 200 ? 'pay' : 'relinquish';
+              handleEventCardConfirm({
+                majorDamageChoice: choice,
+                majorDamageTileId: oppLand.id,
+                majorDamageTargetPlayerId: opp.id,
+              });
+            } else {
+              handleEventCardConfirm();
+            }
+          } else {
+            handleEventCardConfirm();
+          }
+        } else {
+          handleEventCardConfirm();
+        }
       } else if (gamePhase === 'land_action') {
         const currentTile = tiles[currentPlayer.position];
         if (!currentTile) {
@@ -1306,7 +1866,7 @@ export default function App() {
         if (currentTile.ownerId === null) {
           if (currentPlayer.hasSuperLucky) {
             handleRollForSuperLucky();
-          } else if (AIHelper.shouldBuyLand(currentPlayer, currentTile)) {
+          } else if (AIHelper.shouldBuyLand(currentPlayer, currentTile, tiles)) {
             handleBuyLand();
           } else {
             handleSkipBuyLand();
@@ -1320,9 +1880,9 @@ export default function App() {
         } else {
           setGamePhase('turn_end');
         }
-      } else if (gamePhase === 'venue_pass_prompt') {
-        const shouldDraw = AIHelper.shouldDrawCardAtVenuePass(currentPlayer);
-        handleVenuePassChoice(shouldDraw);
+      } else if (gamePhase === 'fortune_hall_prompt') {
+        const shouldDraw = AIHelper.shouldDrawAtFortuneHall(currentPlayer);
+        handleFortuneHallChoice(shouldDraw);
       } else if (gamePhase === 'casino_modal') {
         const bet = AIHelper.getCasinoBet(currentPlayer);
         if (bet.choice === 'skip') {
@@ -1333,6 +1893,47 @@ export default function App() {
           const profit = won ? bet.betAmount : -bet.betAmount;
           handleCasinoFinish(profit);
         }
+      } else if (gamePhase === 'heaven_and_hell_modal') {
+        const roll = Math.floor(Math.random() * 6) + 1;
+        let moneyDelta: number | undefined;
+        let uncontractedTileIds: number[] | undefined;
+        let targetOpponentId: string | undefined;
+
+        if (roll === 1 || roll === 2) {
+          moneyDelta = 200;
+        } else if (roll === 3 || roll === 4) {
+          moneyDelta = -200;
+        } else if (roll === 5) {
+          const myLands = tiles.filter(
+            (t) => t.type === 'land' && t.ownerId === currentPlayer.id
+          );
+          const shuffled = [...myLands].sort(() => Math.random() - 0.5);
+          uncontractedTileIds = shuffled.slice(0, 3).map((t) => t.id);
+        } else if (roll === 6) {
+          const opponents = players.filter((p) => p.id !== currentPlayer.id);
+          const opponentsWithLands = opponents.filter((p) =>
+            tiles.some((t) => t.type === 'land' && t.ownerId === p.id)
+          );
+          if (opponentsWithLands.length > 0) {
+            const opp =
+              opponentsWithLands[Math.floor(Math.random() * opponentsWithLands.length)];
+            targetOpponentId = opp.id;
+            const oppLands = tiles.filter(
+              (t) => t.type === 'land' && t.ownerId === opp.id
+            );
+            const shuffled = [...oppLands].sort(() => Math.random() - 0.5);
+            uncontractedTileIds = shuffled.slice(0, 3).map((t) => t.id);
+          } else {
+            uncontractedTileIds = [];
+          }
+        }
+
+        handleHeavenAndHellFinish({
+          roll,
+          moneyDelta,
+          uncontractedTileIds,
+          targetOpponentId,
+        });
       } else if (gamePhase === 'bankruptcy_modal') {
         const ownedTiles = tiles.filter((t) => t.ownerId === currentPlayer.id);
         const tileToSell = AIHelper.selectLandToSell(currentPlayer, ownedTiles);
@@ -1381,6 +1982,7 @@ export default function App() {
             setGamePhase('setup');
           }}
           onOpenRules={() => setShowRulesModal(true)}
+          onOpenLogs={() => setShowLogModal(true)}
         />
       )}
 
@@ -1395,6 +1997,8 @@ export default function App() {
             isRolling={isRolling}
             gamePhase={gamePhase}
             activePriceFluctuation={activePriceFluctuation}
+            realEstateSalePurchasesRemaining={realEstateSalePurchasesRemaining}
+            isBubbleEra={isBubbleEra}
             logs={logs}
             myPlayerId={myPlayerId}
             isOnline={isOnline}
@@ -1404,11 +2008,12 @@ export default function App() {
             onSkipBuyLand={handleSkipBuyLand}
             onRankUpLand={handleRankUpLand}
             onSkipRankUp={handleSkipRankUp}
-            onVenuePassChoice={handleVenuePassChoice}
+            onFortuneHallChoice={handleFortuneHallChoice}
             onRollForSuperLucky={handleRollForSuperLucky}
             onHelloWorkRoll={handleHelloWorkRoll}
             onEndTurn={handleNextTurn}
             onOpenRules={() => setShowRulesModal(true)}
+            onOpenLogs={() => setShowLogModal(true)}
           />
         </main>
       )}
@@ -1443,6 +2048,8 @@ export default function App() {
           card={currentEventCard}
           player={currentPlayer}
           playerOwnedLands={tiles.filter((t) => t.ownerId === currentPlayer.id)}
+          allPlayers={players}
+          allTiles={tiles}
           onConfirm={handleEventCardConfirm}
         />
       )}
@@ -1450,6 +2057,17 @@ export default function App() {
       {/* 4. Casino Modal */}
       {showCasinoModal && currentPlayer && (
         <CasinoModal player={currentPlayer} onFinish={handleCasinoFinish} />
+      )}
+
+      {/* 4.5. Heaven and Hell Modal (Bubble Era Tile 18) */}
+      {gamePhase === 'heaven_and_hell_modal' && currentPlayer && (
+        <HeavenAndHellModal
+          player={currentPlayer}
+          players={players}
+          tiles={tiles}
+          isMyTurn={isMyTurn}
+          onFinish={handleHeavenAndHellFinish}
+        />
       )}
 
       {/* 5. Bankruptcy Modal */}
@@ -1470,6 +2088,8 @@ export default function App() {
         players={players}
         allTiles={tiles}
         activePriceFluctuation={activePriceFluctuation}
+        isRealEstateSaleActive={realEstateSalePurchasesRemaining > 0}
+        isBubbleEra={isBubbleEra}
         onClose={() => setSelectedTileForDetail(null)}
       />
 
@@ -1490,6 +2110,15 @@ export default function App() {
             setIsOnline(false);
             setGamePhase('setup');
           }}
+        />
+      )}
+
+      {/* 9. Game Log History Modal */}
+      {showLogModal && (
+        <GameLogModal
+          logs={logs}
+          players={players}
+          onClose={() => setShowLogModal(false)}
         />
       )}
     </div>

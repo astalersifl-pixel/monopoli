@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Player, GameSettings, Tile } from '../types/game';
-import { Volume2, VolumeX, Zap, RefreshCw, Trophy, Shield, Sparkles, HelpCircle, Globe, Copy, Check } from 'lucide-react';
+import { Volume2, VolumeX, Zap, RefreshCw, Trophy, Shield, Sparkles, HelpCircle, Globe, Copy, Check, ScrollText } from 'lucide-react';
 
 interface GameHeaderProps {
   players: Player[];
@@ -12,6 +12,7 @@ interface GameHeaderProps {
   onToggleSpeed: () => void;
   onNewGame: () => void;
   onOpenRules: () => void;
+  onOpenLogs: () => void;
 }
 
 export const GameHeader: React.FC<GameHeaderProps> = ({
@@ -24,6 +25,7 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
   onToggleSpeed,
   onNewGame,
   onOpenRules,
+  onOpenLogs,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -94,6 +96,16 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
             ) : (
               <VolumeX className="w-3 h-3 text-slate-400" />
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenLogs}
+            className="p-1 sm:px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
+            title="対戦履歴ログ"
+          >
+            <ScrollText className="w-3 h-3 text-amber-300" />
+            <span className="hidden sm:inline text-[10px] font-bold">ログ</span>
           </button>
 
           <button

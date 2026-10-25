@@ -27,7 +27,7 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
 
   // Local game state
   const [playerCount, setPlayerCount] = useState<number>(3);
-  const [targetMoney, setTargetMoney] = useState<number>(5000);
+  const [targetMoney, setTargetMoney] = useState<number>(2000);
   const [playersConfig, setPlayersConfig] = useState<
     Array<{
       name: string;
@@ -84,6 +84,9 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
       inHelloWork: false,
       hasRentExemption: false,
       hasSuperLucky: false,
+      hasInfoManipulation: false,
+      hasSurgeRent: false,
+      skipNextTurn: false,
       totalLaps: 0,
     }));
 
@@ -166,7 +169,7 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
                   目標金額
                 </label>
                 <div className="grid grid-cols-2 gap-1">
-                  {[5000, 10000].map((amt) => (
+                  {[2000, 4000].map((amt) => (
                     <button
                       key={amt}
                       type="button"
@@ -297,7 +300,7 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
               <div className="flex justify-between items-center text-xs font-black text-slate-600 border-t border-slate-100 pt-2">
                 <span>目標金額:</span>
                 <div className="flex gap-1.5">
-                  {[5000, 10000].map((amt) => (
+                  {[2000, 4000].map((amt) => (
                     <button
                       key={amt}
                       type="button"

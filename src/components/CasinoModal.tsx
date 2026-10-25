@@ -2,7 +2,16 @@ import React, { useState } from 'react';
 import { Player } from '../types/game';
 import { Dice } from './Dice';
 import { sounds } from '../utils/audio';
-import { Dices, Sparkles, Trophy, LogOut } from 'lucide-react';
+import {
+  Dices,
+  Sparkles,
+  Trophy,
+  LogOut,
+  Eye,
+  EyeOff,
+  Layers,
+  ChevronUp,
+} from 'lucide-react';
 
 interface CasinoModalProps {
   player: Player;
@@ -10,7 +19,12 @@ interface CasinoModalProps {
 }
 
 export const CasinoModal: React.FC<CasinoModalProps> = ({ player, onFinish }) => {
-  const [betAmount, setBetAmount] = useState<number>(Math.min(100, Math.max(50, Math.floor(player.money * 0.1))));
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isPeekTranslucent, setIsPeekTranslucent] = useState(false);
+
+  const [betAmount, setBetAmount] = useState<number>(
+    Math.min(100, Math.max(50, Math.floor(player.money * 0.1)))
+  );
   const [betType, setBetType] = useState<'high' | 'low' | 'one'>('high');
   const [isRolling, setIsRolling] = useState(false);
   const [diceRoll, setDiceRoll] = useState(1);
@@ -68,33 +82,119 @@ export const CasinoModal: React.FC<CasinoModalProps> = ({ player, onFinish }) =>
     onFinish(result ? result.profit : 0);
   };
 
+  if (isMinimized) {
+    return (
+      <>
+        {/* Top Notification */}
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 pointer-events-auto bg-slate-900/95 text-white border-2 border-amber-400 px-4 py-1.5 rounded-full shadow-2xl flex items-center gap-2 text-xs font-bold backdrop-blur-md animate-bounce-subtle">
+          <Eye className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>盤面確認中（プレイヤーの所持金や順位を確認できます）</span>
+        </div>
+
+        {/* Bottom Floating Bar */}
+        <div className="fixed bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 w-[95vw] max-w-lg z-50 pointer-events-auto animate-slide-up">
+          <div className="bg-slate-950/95 backdrop-blur-md text-white rounded-2xl p-3.5 sm:p-4 border-2 border-amber-500 shadow-2xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 overflow-hidden min-w-0">
+              <span className="text-2xl shrink-0 p-1.5 bg-amber-500/20 border border-amber-400/40 rounded-xl">
+                🎰
+              </span>
+              <div className="text-left overflow-hidden min-w-0">
+                <div className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+                  GOLDEN CASINO
+                </div>
+                <div className="text-xs sm:text-sm font-black text-white truncate">
+                  所持金: {player.money}M (賭け金: {betAmount}M)
+                </div>
+                <div className="text-[11px] text-slate-300 truncate">
+                  {result ? result.message : 'ダイス勝負待機中'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsMinimized(false)}
+              className="shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 text-xs sm:text-sm font-black rounded-xl shadow-lg cursor-pointer active:scale-95 transition-all border border-amber-300 animate-pulse"
+            >
+              <EyeOff className="w-4 h-4" />
+              <span>カジノに戻る</span>
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in">
-      <div className="relative w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 text-white rounded-3xl shadow-2xl border-4 border-amber-500 overflow-hidden flex flex-col items-center text-center p-6 sm:p-8">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 transition-all duration-200 ${
+        isPeekTranslucent
+          ? 'bg-transparent pointer-events-none'
+          : 'bg-black/70 backdrop-blur-xs'
+      }`}
+    >
+      <div
+        className={`relative w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 text-white rounded-3xl shadow-2xl border-4 border-amber-500 overflow-hidden flex flex-col items-center text-center p-5 sm:p-7 max-h-[92vh] overflow-y-auto transition-all duration-200 ${
+          isPeekTranslucent
+            ? 'opacity-15 scale-95 pointer-events-none'
+            : 'opacity-100 scale-100 animate-scale-up'
+        }`}
+      >
         {/* Glow header */}
         <div className="absolute top-0 inset-x-0 h-28 bg-gradient-to-b from-amber-500/20 to-transparent pointer-events-none" />
 
-        <div className="flex items-center gap-2 text-amber-400 font-black text-xl mb-1">
-          <Dices className="w-7 h-7 animate-bounce-subtle" />
-          <span>GOLDEN CASINO</span>
+        {/* Top Peek Bar */}
+        <div className="w-full flex items-center justify-between mb-2 z-10">
+          <div className="flex items-center gap-1.5 text-amber-400 font-black text-lg">
+            <Dices className="w-6 h-6 animate-bounce-subtle" />
+            <span>GOLDEN CASINO</span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onMouseDown={() => setIsPeekTranslucent(true)}
+              onMouseUp={() => setIsPeekTranslucent(false)}
+              onMouseLeave={() => setIsPeekTranslucent(false)}
+              onTouchStart={() => setIsPeekTranslucent(true)}
+              onTouchEnd={() => setIsPeekTranslucent(false)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-amber-200 text-[11px] font-bold border border-white/20 transition-all cursor-pointer active:scale-95 select-none"
+              title="押している間、画面が透けて盤面が見えます"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>透過</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsMinimized(true)}
+              className="flex items-center gap-1 px-3 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-black shadow-md border border-amber-300 transition-all cursor-pointer active:scale-95"
+              title="最小化して盤面を自由に確認します"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>盤面確認</span>
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-amber-200/80 mb-4 font-bold">
+
+        <p className="text-xs text-amber-200/80 mb-3 font-bold">
           一攫千金のダイス勝負！出目を予測してマニーを増やせ！
         </p>
 
         {/* Player Cash Indicator */}
-        <div className="flex items-center justify-between w-full bg-white/5 border border-amber-500/30 px-4 py-2 rounded-xl mb-4 text-sm font-bold">
+        <div className="flex items-center justify-between w-full bg-white/5 border border-amber-500/30 px-4 py-2 rounded-xl mb-3 text-sm font-bold">
           <span className="text-slate-300">現在の所持金:</span>
           <span className="text-amber-400 font-black text-base">{player.money} マニー</span>
         </div>
 
         {/* Dice Area */}
-        <div className="my-2">
+        <div className="my-1">
           <Dice value={diceRoll} isRolling={isRolling} size="lg" />
         </div>
 
         {result === null ? (
-          <div className="w-full flex flex-col gap-4 mt-2">
+          <div className="w-full flex flex-col gap-3.5 mt-2">
             {/* Bet Type Selection */}
             <div className="flex flex-col gap-1.5 text-left">
               <label className="text-xs font-bold text-slate-300">掛け方を選択 (オッズ):</label>
@@ -175,7 +275,7 @@ export const CasinoModal: React.FC<CasinoModalProps> = ({ player, onFinish }) =>
             </div>
 
             {/* Roll and Skip Buttons */}
-            <div className="flex flex-col gap-2 mt-2">
+            <div className="flex flex-col gap-2 mt-1">
               <button
                 type="button"
                 onClick={handleRoll}
@@ -188,7 +288,7 @@ export const CasinoModal: React.FC<CasinoModalProps> = ({ player, onFinish }) =>
                 type="button"
                 onClick={handleClose}
                 disabled={isRolling}
-                className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-white/10 hover:bg-white/20 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
+                className="flex items-center justify-center gap-1.5 w-full py-2 bg-white/10 hover:bg-white/20 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
                 勝負せずに立ち去る
@@ -196,7 +296,7 @@ export const CasinoModal: React.FC<CasinoModalProps> = ({ player, onFinish }) =>
             </div>
           </div>
         ) : (
-          <div className="w-full flex flex-col items-center gap-4 mt-3">
+          <div className="w-full flex flex-col items-center gap-3 mt-3">
             <div
               className={`w-full p-4 rounded-2xl border ${
                 result.won
