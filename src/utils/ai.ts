@@ -54,6 +54,18 @@ export const AIHelper = {
   },
 
   /**
+   * Decide Jail strategy: 'escape' (脱獄) vs 'release_chance' (釈放チャンス)
+   */
+  chooseJailStrategy(player: Player): 'escape' | 'release_chance' {
+    // If player has powerful cards held, don't lose them: try release chance
+    if (player.hasSuperLucky || player.hasSurgeRent || player.hasRentExemption) {
+      return 'release_chance';
+    }
+    // High success rate of release (~61%)
+    return Math.random() < 0.65 ? 'release_chance' : 'escape';
+  },
+
+  /**
    * Choose which land to sell during bankruptcy
    * Sells lowest-value/unranked lands first to protect high-tier investments
    */
@@ -70,20 +82,58 @@ export const AIHelper = {
   },
 
   /**
+   * Decide whether CPU pays 50 money to draw card when passing event tile
+   */
+  shouldDrawPassingEvent(player: Player): boolean {
+    return player.money >= 150;
+  },
+
+  /**
+   * Decide whether CPU liquidates crime blueprint at Start (+100M)
+   * (Keep 5 if aiming for Master Phantom Thief, otherwise liquidate for free money)
+   */
+  shouldClearCrimeBlueprintAtStart(player: Player): boolean {
+    if (player.crimeBlueprintCount === 5) return false;
+    return true;
+  },
+
+  /**
    * Decide best dice roll (1..6) when AI has info manipulation (情報操作)
    */
-  chooseBestDice(player: Player, allTiles: Tile[]): number {
+  chooseBestDice(player: Player, allTiles: Tile[], allPlayers?: Player[]): number {
     let bestRoll = 6;
     let highestScore = -9999;
 
     for (let r = 1; r <= 6; r++) {
-      const targetPos = (player.position + r) % 24;
+      const targetPos = (player.position + r) % 32;
       const tile = allTiles[targetPos];
       let score = 0;
 
       // Passing or stopping at start grants salary
-      if (player.position + r >= 24) {
+      if (player.position + r >= 32) {
         score += 200;
+      }
+
+      // If holding 5 crime blueprints, landing on Jail (tile 24) triggers Master Phantom Thief mode!
+      if (player.crimeBlueprintCount === 5 && targetPos === 24) {
+        score += 5000;
+      } else if (player.crimeBlueprintCount > 0 && targetPos === 24) {
+        // Holding blueprints but not 5: arrest risk!
+        score -= 2000;
+      }
+
+      // If wanted, avoid landing on tiles where other players are stationed
+      if (player.isWanted && allPlayers) {
+        const hasOtherPlayer = allPlayers.some(
+          (p) => p.id !== player.id && p.position === targetPos && !p.inJail
+        );
+        if (hasOtherPlayer) {
+          score -= 1500;
+        }
+        // Passing or landing on Jail clears wanted status!
+        if (targetPos === 24 || (player.position < 24 && player.position + r >= 24)) {
+          score += 250;
+        }
       }
 
       if (tile.type === 'start') {
@@ -95,7 +145,7 @@ export const AIHelper = {
             let buyScore = 180 + (tile.cost || 0) * 0.5;
             const sim = allTiles.map((t) => (t.id === tile.id ? { ...t, ownerId: player.id } : t));
             if (isAreaMonopoly(tile.id, sim)) {
-              buyScore += 300; // Complete 4-land monopoly!
+              buyScore += 300; // Complete monopoly!
             } else if (isAdjacentLandOwned(tile.id, sim)) {
               buyScore += 140; // Complete adjacent pair!
             }
@@ -118,8 +168,14 @@ export const AIHelper = {
         score += 80;
       } else if (tile.type === 'event' || tile.type === 'venue') {
         score += 60;
-      } else if (tile.type === 'casino') {
-        score += 30;
+      } else if (tile.type === 'jail') {
+        if (player.crimeBlueprintCount === 5) {
+          score += 5000;
+        } else if (player.crimeBlueprintCount > 0) {
+          score -= 2000;
+        } else {
+          score += 20;
+        }
       }
 
       if (score > highestScore) {

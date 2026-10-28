@@ -51,6 +51,13 @@ export const EVENT_CARDS: EventCard[] = [
     description: 'この効果を保持します。一度だけ自分の土地に止まったプレイヤーの支払金が【2倍】になります！（発動時に消費）',
     icon: '💥',
   },
+  {
+    type: 'crime_blueprint',
+    title: '犯罪計画書',
+    subtitle: '危険な秘密文書！',
+    description: 'この計画書を所持したまま【牢屋】に止まると現行犯逮捕されて牢屋に収監されてしまいます！',
+    icon: '📑',
+  },
 
   // --- 占いの館限定カード ---
   {
@@ -109,14 +116,21 @@ export const EVENT_CARDS: EventCard[] = [
     description: '全員を占いの館に呼び出します！その後、参加費として【全員が50マニーを消費】します。',
     icon: '🍻',
   },
+  {
+    type: 'turn_evil',
+    title: '悪に染まる！',
+    subtitle: '闇の誘惑…',
+    description: '犯罪の甘い誘惑に負け、犯罪計画書を【2枚】受け取ってしまいます！（最大5枚まで所持可能）',
+    icon: '😈',
+  },
 ];
 
-// 通常のイベントマス（3, 8, 13, 18）で引けるカード
+// 通常のイベントマスで引けるカード
 export const NORMAL_EVENT_CARDS: EventCard[] = EVENT_CARDS.filter((c) =>
-  ['windfall', 'sudden_expense', 'rent_exemption', 'super_lucky', 'lottery', 'info_manipulation', 'surge_rent'].includes(c.type)
+  ['windfall', 'sudden_expense', 'rent_exemption', 'super_lucky', 'crime_blueprint', 'lottery', 'info_manipulation', 'surge_rent'].includes(c.type)
 );
 
-// 占いの館（マス12）でのみ引けるカード
+// 占いの館（マス16）でのみ引けるカード
 export const FORTUNE_HALL_CARDS: EventCard[] = EVENT_CARDS.filter((c) =>
   [
     'price_fluctuation',
@@ -127,6 +141,7 @@ export const FORTUNE_HALL_CARDS: EventCard[] = EVENT_CARDS.filter((c) =>
     'feel_good_roll',
     'slacking_off',
     'drinking_party',
+    'turn_evil',
   ].includes(c.type)
 );
 

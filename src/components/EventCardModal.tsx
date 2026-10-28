@@ -64,36 +64,28 @@ export const EventCardModal: React.FC<EventCardModalProps> = ({
     return allOpponentLands.length > 0 ? allOpponentLands[0].id : null;
   });
 
-  const [selectedOpponentId, setSelectedOpponentId] = useState<string>(() => {
-    if (opponentsWithLands.length > 0) return opponentsWithLands[0].id;
-    if (opponents.length > 0) return opponents[0].id;
-    return '';
+  // Random selection for Major Damage (大損害！): Target player AND targeted land are chosen randomly
+  const [randomMajorDamage] = useState<{
+    targetOpponent: Player | null;
+    targetLand: Tile | null;
+  }>(() => {
+    if (opponentsWithLands.length === 0) {
+      return { targetOpponent: null, targetLand: null };
+    }
+    const randOpp =
+      opponentsWithLands[Math.floor(Math.random() * opponentsWithLands.length)];
+    const oppLands = allTiles.filter(
+      (t) => t.type === 'land' && t.ownerId === randOpp.id
+    );
+    const randLand =
+      oppLands.length > 0
+        ? oppLands[Math.floor(Math.random() * oppLands.length)]
+        : null;
+    return { targetOpponent: randOpp, targetLand: randLand };
   });
 
-  const selectedOpponent = opponents.find((p) => p.id === selectedOpponentId) || null;
-  const opponentOwnedLands = selectedOpponent
-    ? allTiles.filter((t) => t.ownerId === selectedOpponent.id)
-    : [];
-
-  const [targetDamageTileId, setTargetDamageTileId] = useState<number | null>(() => {
-    if (opponentOwnedLands.length > 0) {
-      return opponentOwnedLands[0].id;
-    }
-    return null;
-  });
-
-  // When selected opponent changes, pick their first land
-  const handleSelectOpponent = (oppId: string) => {
-    setSelectedOpponentId(oppId);
-    const lands = allTiles.filter((t) => t.ownerId === oppId);
-    if (lands.length > 0) {
-      setTargetDamageTileId(lands[0].id);
-    } else {
-      setTargetDamageTileId(null);
-    }
-  };
-
-  const currentDamageTile = allTiles.find((t) => t.id === targetDamageTileId) || null;
+  const selectedOpponent = randomMajorDamage.targetOpponent;
+  const currentDamageTile = randomMajorDamage.targetLand;
   const selectedTransferTile = allOpponentLands.find((t) => t.id === selectedTransferTileId) || null;
 
   const handleRollDice = () => {
@@ -341,58 +333,21 @@ export const EventCardModal: React.FC<EventCardModalProps> = ({
           </div>
         )}
 
-        {/* 3. Major Damage (大損害！ - 対象は自分以外のプレイヤー1名) */}
+        {/* 3. Major Damage (大損害！ - 対象プレイヤーと土地がランダムに選ばれる) */}
         {card.type === 'major_damage' && (
           <div className="mt-4 w-full flex flex-col items-center gap-3">
-            {opponentsWithLands.length > 0 && selectedOpponent && currentDamageTile ? (
-              <div className="w-full bg-rose-50 p-3.5 sm:p-4 rounded-2xl border border-rose-200 text-left">
-                {/* Opponent Selector if multiple have lands */}
-                {opponentsWithLands.length > 1 && (
-                  <div className="mb-2.5">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-bold text-slate-600">
-                        対象の相手プレイヤーを選択:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsMinimized(true)}
-                        className="text-[10px] text-indigo-600 hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <Eye className="w-3 h-3" />
-                        盤面を確認
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {opponentsWithLands.map((opp) => (
-                        <button
-                          key={opp.id}
-                          type="button"
-                          onClick={() => handleSelectOpponent(opp.id)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer transition-all ${
-                            opp.id === selectedOpponentId
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span>{opp.avatar}</span>
-                          <span>{opp.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between gap-2 text-rose-700 font-black text-xs sm:text-sm mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>
-                      直撃対象: {selectedOpponent.name} の No.{currentDamageTile.landNumber}「{currentDamageTile.name}」
-                    </span>
+            {selectedOpponent && currentDamageTile ? (
+              <div className="w-full bg-rose-50 p-3.5 sm:p-4 rounded-2xl border-2 border-rose-300 text-left shadow-sm">
+                {/* Randomly chosen announcement */}
+                <div className="flex items-center justify-between mb-3 bg-rose-500/10 border border-rose-400/40 px-3 py-1.5 rounded-xl">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-rose-800">
+                    <span className="text-sm">🎲</span>
+                    <span>ランダム抽選で対象と被害土地が決定！</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsMinimized(true)}
-                    className="shrink-0 text-[10px] bg-rose-100 hover:bg-rose-200 text-rose-800 px-2 py-0.5 rounded-md font-bold flex items-center gap-0.5 cursor-pointer"
+                    className="shrink-0 text-[10px] bg-rose-200 hover:bg-rose-300 text-rose-900 px-2 py-0.5 rounded-md font-bold flex items-center gap-0.5 cursor-pointer"
                     title="この土地の盤面での位置を確認"
                   >
                     <MapPin className="w-3 h-3" />
@@ -400,11 +355,32 @@ export const EventCardModal: React.FC<EventCardModalProps> = ({
                   </button>
                 </div>
 
-                <div className="text-xs text-slate-700 mb-3 bg-white/80 p-2.5 rounded-xl border border-rose-100 flex flex-col gap-1">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">相手の所持金:</span>
-                    <span className="font-bold">{selectedOpponent.money} マニー</span>
+                <div className="flex flex-col gap-2 mb-3">
+                  {/* Selected Opponent display */}
+                  <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-rose-200">
+                    <span className="text-xs text-slate-500 font-bold">直撃プレイヤー:</span>
+                    <div className="flex items-center gap-1.5 font-black text-slate-900 text-sm">
+                      <span className="text-base">{selectedOpponent.avatar}</span>
+                      <span>{selectedOpponent.name}</span>
+                      <span className="text-[11px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-full ml-1">
+                        所持金: {selectedOpponent.money}M
+                      </span>
+                    </div>
                   </div>
+
+                  {/* Selected Land display */}
+                  <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-rose-200">
+                    <span className="text-xs text-slate-500 font-bold">被害を受けた土地:</span>
+                    <div className="flex items-center gap-1.5 font-black text-rose-700 text-sm">
+                      <span className="w-5 h-5 rounded bg-slate-900 text-white text-[11px] flex items-center justify-center font-mono">
+                        #{currentDamageTile.landNumber}
+                      </span>
+                      <span>{currentDamageTile.name}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-700 mb-3 bg-white/80 p-2.5 rounded-xl border border-rose-100 flex flex-col gap-1">
                   <div className="flex justify-between font-black text-rose-600">
                     <span>必要修繕費:</span>
                     <span>200 マニー</span>
@@ -412,11 +388,11 @@ export const EventCardModal: React.FC<EventCardModalProps> = ({
                   <div className="text-[11px] text-slate-600 pt-1 border-t border-slate-100">
                     {selectedOpponent.money >= 200 ? (
                       <span className="text-emerald-700 font-bold">
-                        ※相手は200マニーを支払って土地を維持します（-200M）
+                        ※ 相手は200マニーを支払って土地を維持します（所持金 -200M）
                       </span>
                     ) : (
                       <span className="text-rose-600 font-bold">
-                        ※相手は200マニーを支払えないため、この土地は【未契約】に戻ります！
+                        ※ 相手は200マニーを支払えないため、この土地は【未契約】に戻ります！
                       </span>
                     )}
                   </div>
@@ -425,7 +401,7 @@ export const EventCardModal: React.FC<EventCardModalProps> = ({
                 <button
                   type="button"
                   onClick={handleApplyMajorDamage}
-                  className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-sm rounded-xl shadow-md cursor-pointer"
+                  className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-sm rounded-xl shadow-md cursor-pointer active:scale-95 transition-all"
                 >
                   大損害を発動する！
                 </button>
@@ -722,7 +698,29 @@ export const EventCardModal: React.FC<EventCardModalProps> = ({
           </div>
         )}
 
-        {/* 12. Standard Confirm for remaining standard cards */}
+        {/* 12. Crime Blueprint (犯罪計画書) */}
+        {card.type === 'crime_blueprint' && (
+          <div className="mt-4 w-full flex flex-col items-center gap-2.5">
+            <div className="w-full bg-rose-50 p-3 rounded-2xl border-2 border-rose-300 text-xs font-bold text-rose-950 text-left">
+              <div className="flex items-center gap-1.5 font-black text-rose-700 mb-1">
+                <AlertTriangle className="w-4 h-4" />
+                <span>要注意アイテム：犯罪計画書</span>
+              </div>
+              <p>
+                この計画書を所持した状態で<strong>【牢屋】マス（左下）に止まると現行犯逮捕</strong>され、牢屋に収監されてしまいます！
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onConfirm()}
+              className="w-full py-3 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white font-black text-sm rounded-xl shadow-md cursor-pointer active:scale-98"
+            >
+              計画書を懐にしまう（所持する）
+            </button>
+          </div>
+        )}
+
+        {/* 13. Standard Confirm for remaining standard cards */}
         {['windfall', 'sudden_expense', 'rent_exemption', 'super_lucky'].includes(card.type) && (
           <div className="mt-5 w-full">
             <button

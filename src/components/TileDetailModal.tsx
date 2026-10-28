@@ -14,10 +14,10 @@ interface TileDetailModalProps {
 }
 
 function getDistrictName(tileId: number): string | null {
-  if ([1, 2, 4, 5].includes(tileId)) return '住宅街 (ひよこ〜みどり坂)';
-  if ([7, 8, 10, 11].includes(tileId)) return '港湾街 (川沿い〜白銀テラス)';
-  if ([13, 14, 16, 17].includes(tileId)) return '商業街 (学園前〜クラウン)';
-  if ([19, 20, 22, 23].includes(tileId)) return '高級街 (クリスタル〜ロイヤル)';
+  if ([1, 2, 3, 5, 6, 7].includes(tileId)) return '住宅街 (ひよこ〜さくら通り)';
+  if ([9, 10, 11, 13, 14, 15].includes(tileId)) return '港湾街 (ベイサイド〜白銀テラス)';
+  if ([17, 18, 19, 21, 22, 23].includes(tileId)) return '商業街 (学園前〜クラウンヒルズ)';
+  if ([25, 26, 27, 29, 30, 31].includes(tileId)) return '高級街 (クリスタル〜エンペラー)';
   return null;
 }
 
@@ -45,10 +45,12 @@ export const TileDetailModal: React.FC<TileDetailModalProps> = ({
         )
       : null;
 
-  const isTransformedHeavenAndHell = tile.type === 'casino' && isBubbleEra;
+  const isTransformedHeavenAndHell = tile.type === 'hellowork' && isBubbleEra;
   const displayName = isTransformedHeavenAndHell ? '天国と地獄' : tile.name;
   const displayDescription = isTransformedHeavenAndHell
-    ? 'すべての土地契約によりカジノが閉店し、運命を分かつ「天国と地獄マス」へと変化しました。止まると審判のサイコロを振ります。'
+    ? 'すべての土地契約により運命を分かつ「天国と地獄マス」へと変化しました（バブル期はハローワークは存在しません）。止まると審判のサイコロを振ります。'
+    : tile.type === 'jail'
+    ? '通常は何の効果もないマス。犯罪計画書を持っていると現行犯逮捕されて収監されてしまいます！'
     : tile.description;
 
   const baseCost = tile.cost || 0;
@@ -165,10 +167,12 @@ export const TileDetailModal: React.FC<TileDetailModalProps> = ({
                 </div>
               ) : (
                 <div className="flex justify-between text-slate-600">
-                  <span>隣接ボーナス (指定ペア保有):</span>
+                  <span>隣接ボーナス (区画内隣接):</span>
                   <span className="font-bold">
                     {rentInfo.isAdjacentBonus ? (
-                      <span className="text-rose-600 font-black">×1.5 (ペア保有中！)</span>
+                      <span className="text-rose-600 font-black">
+                        ×{rentInfo.adjacentMultiplier} ({rentInfo.adjacentMultiplier === 1.8 ? '3マス連続所有！' : '2マス隣接所有！'})
+                      </span>
                     ) : (
                       '×1.0'
                     )}

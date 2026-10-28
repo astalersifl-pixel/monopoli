@@ -87,6 +87,7 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
       hasInfoManipulation: false,
       hasSurgeRent: false,
       skipNextTurn: false,
+      crimeBlueprintCount: 0,
       totalLaps: 0,
     }));
 
@@ -108,7 +109,7 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
         <div className="text-center flex flex-col items-center">
           <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-800 text-[10px] sm:text-[11px] font-black border border-amber-400/40 mb-1">
             <Dices className="w-3 h-3 text-amber-600" />
-            7×7マス 本格すごろくゲーム
+            9×9マス 本格すごろくゲーム
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-1.5 leading-none">
             <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-gradient-to-tr from-amber-400 to-yellow-300 text-slate-950 flex items-center justify-center text-base sm:text-lg shadow-sm">
@@ -240,6 +241,21 @@ export const StartGameModal: React.FC<StartGameModalProps> = ({
                         className="flex-1 min-w-0 bg-white border border-slate-300 text-slate-800 text-xs font-bold rounded-lg px-2 py-0.5 focus:outline-hidden"
                         placeholder={`プレイヤー${idx + 1}`}
                       />
+
+                      {playersConfig[idx].name !== 'デバッグモード' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePlayer(idx, 'name', 'デバッグモード')}
+                          className="px-1.5 py-0.5 text-[9px] font-bold text-slate-500 hover:text-amber-800 bg-slate-100 hover:bg-amber-100 border border-slate-200 rounded shrink-0 cursor-pointer"
+                          title="プレイヤー名を「デバッグモード」に設定"
+                        >
+                          🛠️デバッグ
+                        </button>
+                      ) : (
+                        <span className="px-1.5 py-0.5 text-[9px] font-black text-amber-800 bg-amber-100 border border-amber-300 rounded shrink-0">
+                          🛠️有効
+                        </span>
+                      )}
 
                       <button
                         type="button"

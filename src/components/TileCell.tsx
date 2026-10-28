@@ -24,8 +24,8 @@ interface DistrictInfo {
 }
 
 function getDistrictInfo(tileId: number): DistrictInfo | null {
-  // Right side (No.1, 2, 4, 5): 住宅街 (Residential)
-  if ([1, 2, 4, 5].includes(tileId)) {
+  // Right side (No.1..6): 住宅街 (Residential)
+  if ([1, 2, 3, 5, 6, 7].includes(tileId)) {
     return {
       name: '住宅街',
       theme: 'emerald',
@@ -34,8 +34,8 @@ function getDistrictInfo(tileId: number): DistrictInfo | null {
       icon: '🏡',
     };
   }
-  // Top side (No.6, 7, 9, 10): 港湾街 (Port/Waterfront)
-  if ([7, 8, 10, 11].includes(tileId)) {
+  // Top side (No.7..12): 港湾街 (Port/Waterfront)
+  if ([9, 10, 11, 13, 14, 15].includes(tileId)) {
     return {
       name: '港湾街',
       theme: 'sky',
@@ -44,8 +44,8 @@ function getDistrictInfo(tileId: number): DistrictInfo | null {
       icon: '⚓',
     };
   }
-  // Left side (No.11, 12, 14, 15): 商業街 (Commercial)
-  if ([13, 14, 16, 17].includes(tileId)) {
+  // Left side (No.13..18): 商業街 (Commercial)
+  if ([17, 18, 19, 21, 22, 23].includes(tileId)) {
     return {
       name: '商業街',
       theme: 'amber',
@@ -54,8 +54,8 @@ function getDistrictInfo(tileId: number): DistrictInfo | null {
       icon: '🛍️',
     };
   }
-  // Bottom side (No.16, 17, 19, 20): 高級街 (Luxury)
-  if ([19, 20, 22, 23].includes(tileId)) {
+  // Bottom side (No.19..24): 高級街 (Luxury)
+  if ([25, 26, 27, 29, 30, 31].includes(tileId)) {
     return {
       name: '高級街',
       theme: 'purple',
@@ -134,7 +134,7 @@ export const TileCell: React.FC<TileCellProps> = ({
     }
   };
 
-  const isCorner = ['start', 'hellowork', 'venue', 'casino'].includes(tile.type);
+  const isCorner = ['start', 'hellowork', 'venue', 'jail'].includes(tile.type);
 
   return (
     <div
@@ -151,16 +151,16 @@ export const TileCell: React.FC<TileCellProps> = ({
           : tile.type === 'start'
           ? 'bg-gradient-to-br from-emerald-600 via-teal-700 to-emerald-800 text-white border-emerald-300 shadow-md'
           : tile.type === 'hellowork'
-          ? 'bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700 text-white border-amber-300 shadow-md'
-          : tile.type === 'venue'
-          ? 'bg-gradient-to-br from-purple-700 via-indigo-800 to-purple-900 text-white border-purple-300 shadow-md'
-          : tile.type === 'casino'
           ? isBubbleEra
             ? 'bg-gradient-to-br from-amber-700 via-rose-900 to-indigo-950 text-white border-amber-400 shadow-md ring-2 ring-amber-300/60'
-            : 'bg-gradient-to-br from-rose-600 via-pink-700 to-rose-800 text-white border-rose-300 shadow-md'
+            : 'bg-gradient-to-br from-amber-500 via-orange-600 to-amber-700 text-white border-amber-300 shadow-md'
+          : tile.type === 'venue'
+          ? 'bg-gradient-to-br from-purple-700 via-indigo-800 to-purple-900 text-white border-purple-300 shadow-md'
+          : tile.type === 'jail'
+          ? 'bg-gradient-to-br from-slate-800 via-zinc-800 to-neutral-900 text-white border-slate-500 shadow-md'
           : 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-300 text-indigo-950 shadow-xs'
       }`}
-      title={`${tile.type === 'casino' && isBubbleEra ? '天国と地獄' : tile.name} (タップで詳細確認)`}
+      title={`${tile.type === 'hellowork' && isBubbleEra ? '天国と地獄' : tile.name} (タップで詳細確認)`}
     >
       {/* 1. TOP HEADER STRIP */}
       {tile.type === 'land' ? (
@@ -173,6 +173,11 @@ export const TileCell: React.FC<TileCellProps> = ({
               <span className="text-[9px] sm:text-[11px] font-black tracking-tight shrink-0">
                 #{tile.landNumber}
               </span>
+              {owner.isPhantomThief && (
+                <span className="text-[8px] sm:text-[9px] font-black bg-purple-900 text-amber-300 px-1 py-0.2 rounded shadow-2xs shrink-0 animate-pulse border border-amber-400">
+                  🎩怪盗
+                </span>
+              )}
               {tile.rank ? (
                 <span className="text-[8px] sm:text-[9px] font-black bg-amber-300 text-slate-950 px-1 py-0.2 rounded shadow-2xs shrink-0 animate-pulse">
                   ★Lv.2
@@ -223,15 +228,15 @@ export const TileCell: React.FC<TileCellProps> = ({
         <div className="w-full flex items-center justify-between px-1.5 py-0.5 sm:py-1 bg-black/25 text-white/90 border-b border-white/20">
           <span className="text-[8px] sm:text-[9px] font-black tracking-wider uppercase">
             {tile.type === 'start' && '🏁 START'}
-            {tile.type === 'hellowork' && '💼 再起'}
+            {tile.type === 'hellowork' && (isBubbleEra ? '⚖️ 審判' : '💼 再起')}
             {tile.type === 'venue' && '🔮 占いの館'}
-            {tile.type === 'casino' && (isBubbleEra ? '⚖️ 審判' : '🎰 CASINO')}
+            {tile.type === 'jail' && '⛓️ 牢屋'}
           </span>
           <span className="text-[8px] sm:text-[9px] font-bold opacity-80">
             {tile.type === 'start' && '給与'}
-            {tile.type === 'hellowork' && 'ハローワーク'}
+            {tile.type === 'hellowork' && (isBubbleEra ? '天国と地獄' : 'ハローワーク')}
             {tile.type === 'venue' && '波乱'}
-            {tile.type === 'casino' && (isBubbleEra ? '天国と地獄' : '配当')}
+            {tile.type === 'jail' && '通常効果無'}
           </span>
         </div>
       ) : (
@@ -253,17 +258,17 @@ export const TileCell: React.FC<TileCellProps> = ({
           <Flag className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 drop-shadow-sm mb-0.5" />
         )}
         {tile.type === 'hellowork' && (
-          <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-amber-200 drop-shadow-sm mb-0.5" />
+          isBubbleEra ? (
+            <span className="text-base sm:text-xl drop-shadow-sm mb-0.5 animate-pulse">⚖️</span>
+          ) : (
+            <Briefcase className="w-4 h-4 sm:w-5 sm:h-5 text-amber-200 drop-shadow-sm mb-0.5" />
+          )
         )}
         {tile.type === 'venue' && (
           <span className="text-base sm:text-xl drop-shadow-sm mb-0.5">🔮</span>
         )}
-        {tile.type === 'casino' && (
-          isBubbleEra ? (
-            <span className="text-base sm:text-xl drop-shadow-sm mb-0.5 animate-pulse">⚖️</span>
-          ) : (
-            <Dices className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-300 drop-shadow-sm mb-0.5" />
-          )
+        {tile.type === 'jail' && (
+          <span className="text-base sm:text-xl drop-shadow-sm mb-0.5">⛓️</span>
         )}
         {tile.type === 'event' && (
           <span className="text-base sm:text-xl drop-shadow-sm mb-0.5">⚡</span>
@@ -279,7 +284,7 @@ export const TileCell: React.FC<TileCellProps> = ({
               : 'text-slate-900'
           }`}
         >
-          {tile.type === 'casino' && isBubbleEra ? '天国と地獄' : tile.name}
+          {tile.type === 'hellowork' && isBubbleEra ? '天国と地獄' : tile.name}
         </div>
 
         {/* Active Multiplier Badges (Floating quietly under name) */}
@@ -294,20 +299,16 @@ export const TileCell: React.FC<TileCellProps> = ({
               </span>
             ) : rentInfo.isAdjacentBonus ? (
               <span
-                className="text-[7px] sm:text-[8px] font-black bg-rose-500 text-white px-1 py-0.2 rounded shadow-2xs tracking-tighter"
-                title="隣接保有ボーナス: 支払額1.5倍"
+                className={`text-[7px] sm:text-[8px] font-black text-white px-1 py-0.2 rounded shadow-2xs tracking-tighter ${
+                  rentInfo.adjacentMultiplier === 1.8
+                    ? 'bg-gradient-to-r from-rose-600 to-amber-600 ring-1 ring-amber-300'
+                    : 'bg-rose-500'
+                }`}
+                title={`隣接保有ボーナス: 支払額${rentInfo.adjacentMultiplier}倍`}
               >
-                🤝隣接1.5x
+                🤝隣接{rentInfo.adjacentMultiplier}x
               </span>
             ) : null}
-            {rentInfo.isBubbleEra && (
-              <span
-                className="text-[7px] sm:text-[8px] font-black bg-cyan-400 text-slate-950 px-1 py-0.2 rounded shadow-2xs font-mono tracking-tighter"
-                title="バブル期ボーナス: 通行料+100M"
-              >
-                +100M
-              </span>
-            )}
             {activePriceFluctuation && (
               <span
                 className={`text-[7px] sm:text-[8px] font-black px-1 py-0.2 rounded shadow-2xs ${
@@ -331,7 +332,7 @@ export const TileCell: React.FC<TileCellProps> = ({
           </div>
         )}
 
-        {/* Player Pawns Standing in Middle (Overlays cleanly without blocking bottom numbers) */}
+        {/* Player Pawns Standing in Middle */}
         {playersOnTile.length > 0 && (
           <div className="absolute inset-0 flex items-center justify-center -space-x-1 sm:-space-x-1.5 z-30 pointer-events-none bg-white/75 sm:bg-white/80 backdrop-blur-[1px] rounded-lg p-0.5 transition-all">
             {playersOnTile.map((p) => (
@@ -348,9 +349,23 @@ export const TileCell: React.FC<TileCellProps> = ({
                     ? 'bg-amber-500 ring-amber-400'
                     : 'bg-purple-500 ring-purple-400'
                 } animate-bounce-subtle`}
-                title={`${p.name} (所持金: ${p.money}M)`}
+                title={`${p.name} (所持金: ${p.money}M)${p.inJail ? '【牢屋収監中】' : ''}${p.isWanted ? '【指名手配中】' : ''}${p.isPhantomThief ? '【大怪盗モード】' : ''}`}
               >
                 <span>{p.avatar}</span>
+                {p.inJail && (
+                  <span className="absolute -top-1 -right-1 text-[9px] bg-black/80 rounded-full px-0.5" title="収監中">
+                    ⛓️
+                  </span>
+                )}
+                {p.isPhantomThief ? (
+                  <span className="absolute -bottom-1 -right-1 text-[9px] bg-purple-900 border border-amber-300 rounded-full px-0.5 animate-bounce" title="大怪盗">
+                    🎩
+                  </span>
+                ) : p.isWanted && !p.inJail && (
+                  <span className="absolute -bottom-1 -right-1 text-[9px] bg-amber-500 rounded-full px-0.5 animate-pulse" title="指名手配">
+                    🚨
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -395,7 +410,7 @@ export const TileCell: React.FC<TileCellProps> = ({
               <div className="flex items-center justify-between text-[8px] sm:text-[9px] text-slate-500 leading-tight">
                 <span>家賃</span>
                 <span className="font-mono tabular-nums font-semibold">
-                  {tile.baseRent}M
+                  {(tile.baseRent || 0) + (isBubbleEra ? 100 : 0)}M
                 </span>
               </div>
             </div>
@@ -405,22 +420,22 @@ export const TileCell: React.FC<TileCellProps> = ({
             {isBubbleEra ? '給与 +300M (バブル)' : '給与 +200M'}
           </div>
         ) : tile.type === 'hellowork' ? (
-          <div className="bg-black/30 border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-amber-100">
-            {isBubbleEra ? '出目×100+100M' : '出目×100M 給与'}
+          <div
+            className={`border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black ${
+              isBubbleEra
+                ? 'bg-amber-500/30 text-amber-200 animate-pulse'
+                : 'bg-black/30 text-amber-100'
+            }`}
+          >
+            {isBubbleEra ? '⚖️ 審判のダイス' : '出目×100M 給与'}
           </div>
         ) : tile.type === 'venue' ? (
           <div className="bg-black/30 border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-purple-100">
             100Mで占い
           </div>
-        ) : tile.type === 'casino' ? (
-          <div
-            className={`border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black ${
-              isBubbleEra
-                ? 'bg-amber-500/30 text-amber-200 animate-pulse'
-                : 'bg-black/30 text-yellow-200'
-            }`}
-          >
-            {isBubbleEra ? '⚖️ 審判のダイス' : 'ダイス勝負'}
+        ) : tile.type === 'jail' ? (
+          <div className="bg-black/40 border-t border-white/20 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-slate-300">
+            通常効果なし
           </div>
         ) : (
           <div className="bg-indigo-100/90 border-t border-indigo-200 px-1 py-0.5 sm:py-1 text-center text-[8px] sm:text-[10px] font-black text-indigo-700">
